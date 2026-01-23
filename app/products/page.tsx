@@ -12,6 +12,12 @@ type Product = {
   currency: string
   unit: string
   description: string | null
+  brand: string | null
+  product_subtype: string | null
+  size_measurement: string | null
+  material: string | null
+  pressure_class: string | null
+  product_features: string | null
 }
 
 export default function ProductsPage() {
@@ -27,7 +33,13 @@ export default function ProductsPage() {
     base_price: '',
     currency: 'TL',
     unit: 'adet',
-    description: ''
+    description: '',
+    brand: '',
+    product_subtype: '',
+    size_measurement: '',
+    material: '',
+    pressure_class: 'PN10',
+    product_features: ''
   })
 
   useEffect(() => {
@@ -71,7 +83,13 @@ export default function ProductsPage() {
       base_price: formData.base_price ? parseFloat(formData.base_price) : 0,
       currency: formData.currency,
       unit: formData.unit.trim() || 'adet',
-      description: formData.description.trim() || null
+      description: formData.description.trim() || null,
+      brand: formData.brand.trim() || null,
+      product_subtype: formData.product_subtype.trim() || null,
+      size_measurement: formData.size_measurement.trim() || null,
+      material: formData.material.trim() || null,
+      pressure_class: formData.pressure_class || 'PN10',
+      product_features: formData.product_features.trim() || null
     }
 
     if (editingId) {
@@ -114,7 +132,13 @@ export default function ProductsPage() {
       base_price: product.base_price.toString(),
       currency: product.currency,
       unit: product.unit,
-      description: product.description || ''
+      description: product.description || '',
+      brand: product.brand || '',
+      product_subtype: product.product_subtype || '',
+      size_measurement: product.size_measurement || '',
+      material: product.material || '',
+      pressure_class: product.pressure_class || 'PN10',
+      product_features: product.product_features || ''
     })
     setEditingId(product.id)
     setShowAddForm(true)
@@ -144,7 +168,13 @@ export default function ProductsPage() {
       base_price: '',
       currency: 'TL',
       unit: 'adet',
-      description: ''
+      description: '',
+      brand: '',
+      product_subtype: '',
+      size_measurement: '',
+      material: '',
+      pressure_class: 'PN10',
+      product_features: ''
     })
     setEditingId(null)
     setShowAddForm(false)
@@ -189,7 +219,13 @@ export default function ProductsPage() {
           <h3 className="font-semibold text-lg mb-4">
             {editingId ? 'Ürünü Düzenle' : 'Yeni Ürün Ekle'}
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+          {/* Temel Bilgiler */}
+          <div className="mb-6">
+            <h4 className="font-medium text-gray-700 mb-3 flex items-center gap-2">
+              <span className="text-blue-600">📦</span> Temel Bilgiler
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Ürün Tipi <span className="text-red-500">*</span>
@@ -267,17 +303,107 @@ export default function ProductsPage() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg"
               />
             </div>
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Açıklama <span className="text-gray-400">(opsiyonel)</span>
-              </label>
-              <textarea
-                value={formData.description}
-                onChange={(e) => setFormData({...formData, description: e.target.value})}
-                placeholder="Ürün hakkında ek bilgiler..."
-                rows={2}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-              />
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Açıklama <span className="text-gray-400">(opsiyonel)</span>
+                </label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({...formData, description: e.target.value})}
+                  placeholder="Ürün hakkında ek bilgiler..."
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Yapılandırılmış Etiketler (Structured Tags) */}
+          <div className="mb-6 pt-6 border-t border-gray-200">
+            <h4 className="font-medium text-gray-700 mb-2 flex items-center gap-2">
+              <span className="text-purple-600">🏷️</span> Yapılandırılmış Etiketler
+              <span className="text-xs text-gray-500 font-normal">(AI arama için optimize edilmiş)</span>
+            </h4>
+            <p className="text-xs text-gray-600 mb-4">
+              Bu alanlar AI eşleştirme algoritmasının doğruluğunu artırır. Boş bırakılabilir.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Marka (Brand)
+                </label>
+                <input
+                  type="text"
+                  value={formData.brand}
+                  onChange={(e) => setFormData({...formData, brand: e.target.value})}
+                  placeholder="NTG, VESBO, IKSAN..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Alt Tip (Subtype)
+                </label>
+                <input
+                  type="text"
+                  value={formData.product_subtype}
+                  onChange={(e) => setFormData({...formData, product_subtype: e.target.value})}
+                  placeholder="EF, PE, Redüksiyon..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Ölçü (Size)
+                </label>
+                <input
+                  type="text"
+                  value={formData.size_measurement}
+                  onChange={(e) => setFormData({...formData, size_measurement: e.target.value})}
+                  placeholder="63-50, 110, 20-25..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Hammadde (Material)
+                </label>
+                <input
+                  type="text"
+                  value={formData.material}
+                  onChange={(e) => setFormData({...formData, material: e.target.value})}
+                  placeholder="PE, HDPE, U-PVC..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Basınç Sınıfı
+                </label>
+                <select
+                  value={formData.pressure_class}
+                  onChange={(e) => setFormData({...formData, pressure_class: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                >
+                  <option value="PN10">PN10</option>
+                  <option value="PN16">PN16</option>
+                  <option value="PN6">PN6</option>
+                  <option value="PN8">PN8</option>
+                  <option value="PN20">PN20</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Özellikler (Features)
+                </label>
+                <input
+                  type="text"
+                  value={formData.product_features}
+                  onChange={(e) => setFormData({...formData, product_features: e.target.value})}
+                  placeholder="Siyah, Flanşlı..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                />
+              </div>
             </div>
           </div>
           <div className="flex gap-2 mt-4">
@@ -324,6 +450,7 @@ export default function ProductsPage() {
               <th className="text-left p-3">Kod</th>
               <th className="text-left p-3">Tip</th>
               <th className="text-left p-3">Çap</th>
+              <th className="text-left p-3 text-xs">🏷️ Etiketler</th>
               <th className="text-right p-3">Fiyat</th>
               <th className="text-left p-3">Birim</th>
               <th className="text-left p-3">Açıklama</th>
@@ -345,6 +472,33 @@ export default function ProductsPage() {
                   </div>
                 </td>
                 <td className="p-3">{product.diameter || '-'}</td>
+                <td className="p-3">
+                  <div className="flex flex-wrap gap-1 max-w-xs">
+                    {product.brand && (
+                      <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded" title="Marka">
+                        {product.brand}
+                      </span>
+                    )}
+                    {product.product_subtype && (
+                      <span className="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded" title="Alt Tip">
+                        {product.product_subtype}
+                      </span>
+                    )}
+                    {product.size_measurement && (
+                      <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded" title="Ölçü">
+                        {product.size_measurement}
+                      </span>
+                    )}
+                    {product.material && (
+                      <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded" title="Hammadde">
+                        {product.material}
+                      </span>
+                    )}
+                    {!product.brand && !product.product_subtype && !product.size_measurement && !product.material && (
+                      <span className="text-xs text-gray-400">-</span>
+                    )}
+                  </div>
+                </td>
                 <td className="p-3 text-right">
                   <div className="flex items-center justify-end gap-2">
                     <span className="font-medium">{product.base_price.toFixed(2)} {getCurrencySymbol(product.currency)}</span>

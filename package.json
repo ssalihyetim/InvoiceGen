@@ -6,10 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "migrate:products": "node scripts/migrate-product-tags.mjs",
+    "migrate:products:dry-run": "node scripts/migrate-product-tags.mjs --dry-run"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.10",
+    "dotenv": "^17.2.3",
     "next": "^15.1.3",
     "openai": "^4.77.0",
     "react": "^18.3.1",
