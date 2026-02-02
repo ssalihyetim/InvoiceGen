@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
               try {
                 const { error: singleError } = await supabase
                   .from('products')
-                  .upsert([product], { onConflict: 'product_code' })
+                  .upsert([product] as any, { onConflict: 'product_code' })
 
                 if (singleError) {
                   failedCount++
@@ -117,12 +117,12 @@ export async function POST(request: NextRequest) {
     // Import geçmişini kaydet
     await supabase.from('import_history').insert({
       file_name: 'excel-import',
-      file_url: '-',
-      total_rows: products.length,
+      file_size: 0,
+      total_products: products.length,
       successful_imports: successCount,
       failed_imports: failedCount,
       error_log: errors.length > 0 ? errors : null,
-    })
+    } as any)
 
     const endTime = Date.now()
     const duration = ((endTime - startTime) / 1000).toFixed(2)

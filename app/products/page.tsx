@@ -30,6 +30,15 @@ export default function ProductsPage() {
     description: ''
   })
 
+  // Bulk edit state
+  const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set())
+  const [showBulkEdit, setShowBulkEdit] = useState(false)
+  const [bulkEditData, setBulkEditData] = useState({
+    currency: '',
+    unit: '',
+    price_multiplier: '1.0'
+  })
+
   useEffect(() => {
     loadProducts()
   }, [])
@@ -42,6 +51,21 @@ export default function ProductsPage() {
       .limit(10000)  // 10,000'e kadar ürün göster
 
     if (search) {
+      // Exact match önceliği - tam ürün kodu araması
+      const exactMatch = await supabase
+        .from('products')
+        .select('*', { count: 'exact' })
+        .eq('product_code', search)
+        .limit(1)
+
+      if (exactMatch.data && exactMatch.data.length > 0) {
+        setProducts(exactMatch.data as any)
+        setTotalCount(exactMatch.count || 0)
+        console.log(`Exact match bulundu: ${(exactMatch.data[0] as any).product_code}`)
+        return
+      }
+
+      // Partial search
       query = query.or(`product_code.ilike.%${search}%,product_type.ilike.%${search}%,diameter.ilike.%${search}%`)
     }
 
@@ -54,13 +78,47 @@ export default function ProductsPage() {
     }
   }
 
+  // Debounced search - 300ms gecikme ile arama yap
   useEffect(() => {
-    loadProducts()
+    const timer = setTimeout(() => {
+      loadProducts()
+    }, 300)
+
+    return () => clearTimeout(timer)
   }, [search])
 
+  const getErrorMessage = (error: any): string => {
+    // PostgreSQL error kodlarına göre kullanıcı dostu mesajlar
+    switch (error.code) {
+      case '23505': // Unique violation
+        return 'Bu ürün kodu zaten mevcut! Lütfen farklı bir kod kullanın.'
+      case '23503': // Foreign key violation
+        return 'Bu ürün kullanan teklifler var! Önce teklifleri silmeniz gerekiyor.'
+      case '23502': // NOT NULL violation
+        return 'Zorunlu alanları doldurun (Ürün Tipi ve Ürün Kodu gereklidir).'
+      case '22P02': // Invalid text representation
+        return 'Geçersiz veri formatı! Lütfen alanları kontrol edin.'
+      default:
+        return `Hata: ${error.message || 'Bilinmeyen bir hata oluştu'}`
+    }
+  }
+
   const handleSave = async () => {
-    if (!formData.product_type || !formData.product_code) {
-      alert('Lütfen zorunlu alanları doldurun (Tip ve Kod)')
+    // Frontend validation
+    if (!formData.product_type || !formData.product_type.trim()) {
+      alert('Ürün tipi zorunludur!')
+      return
+    }
+
+    if (!formData.product_code || !formData.product_code.trim()) {
+      alert('Ürün kodu zorunludur!')
+      return
+    }
+
+    // Fiyat validation
+    const price = formData.base_price ? parseFloat(formData.base_price) : 0
+    if (isNaN(price) || price < 0) {
+      alert('Geçersiz fiyat! Lütfen geçerli bir sayı girin.')
       return
     }
 
@@ -68,7 +126,7 @@ export default function ProductsPage() {
       product_type: formData.product_type.trim(),
       diameter: formData.diameter.trim() || null,
       product_code: formData.product_code.trim(),
-      base_price: formData.base_price ? parseFloat(formData.base_price) : 0,
+      base_price: price,
       currency: formData.currency,
       unit: formData.unit.trim() || 'adet',
       description: formData.description.trim() || null
@@ -76,27 +134,23 @@ export default function ProductsPage() {
 
     if (editingId) {
       // Update existing product
-      const { error } = await supabase
-        .from('products')
-        .update({ ...productData, updated_at: new Date().toISOString() })
+      const { error } = await (supabase
+        .from('products') as any)
+        .update({ ...productData })
         .eq('id', editingId)
 
       if (error) {
-        alert('Hata: ' + error.message)
+        alert(getErrorMessage(error))
         return
       }
     } else {
       // Insert new product
-      const { error } = await supabase
-        .from('products')
+      const { error } = await (supabase
+        .from('products') as any)
         .insert([productData])
 
       if (error) {
-        if (error.code === '23505') {
-          alert('Bu ürün kodu zaten mevcut!')
-        } else {
-          alert('Hata: ' + error.message)
-        }
+        alert(getErrorMessage(error))
         return
       }
     }
@@ -129,7 +183,7 @@ export default function ProductsPage() {
       .eq('id', id)
 
     if (error) {
-      alert('Hata: ' + error.message)
+      alert(getErrorMessage(error))
       return
     }
 
@@ -148,6 +202,118 @@ export default function ProductsPage() {
     })
     setEditingId(null)
     setShowAddForm(false)
+  }
+
+  // Bulk edit functions
+  const toggleProductSelection = (productId: string) => {
+    const newSelection = new Set(selectedProducts)
+    if (newSelection.has(productId)) {
+      newSelection.delete(productId)
+    } else {
+      newSelection.add(productId)
+    }
+    setSelectedProducts(newSelection)
+  }
+
+  const selectAll = () => {
+    if (selectedProducts.size === products.length) {
+      setSelectedProducts(new Set())
+    } else {
+      setSelectedProducts(new Set(products.map(p => p.id)))
+    }
+  }
+
+  const handleBulkUpdate = async () => {
+    if (selectedProducts.size === 0) {
+      alert('Lütfen en az bir ürün seçin')
+      return
+    }
+
+    const multiplier = parseFloat(bulkEditData.price_multiplier)
+    if (isNaN(multiplier) || multiplier <= 0) {
+      alert('Geçersiz fiyat çarpanı! Lütfen pozitif bir sayı girin.')
+      return
+    }
+
+    if (!confirm(`${selectedProducts.size} ürün güncellenecek. Emin misiniz?`)) {
+      return
+    }
+
+    let successCount = 0
+    let errorCount = 0
+
+    for (const productId of selectedProducts) {
+      const product = products.find(p => p.id === productId)
+      if (!product) continue
+
+      const updates: any = {}
+
+      // Para birimi değiştir
+      if (bulkEditData.currency) {
+        updates.currency = bulkEditData.currency
+      }
+
+      // Birim değiştir
+      if (bulkEditData.unit) {
+        updates.unit = bulkEditData.unit
+      }
+
+      // Fiyat çarpanı uygula (1.0'dan farklıysa)
+      if (multiplier !== 1.0) {
+        updates.base_price = product.base_price * multiplier
+      }
+
+      if (Object.keys(updates).length > 0) {
+        const { error } = await (supabase
+          .from('products') as any)
+          .update({ ...updates })
+          .eq('id', productId)
+
+        if (error) {
+          console.error(`Hata (${product.product_code}):`, error)
+          errorCount++
+        } else {
+          successCount++
+        }
+      }
+    }
+
+    alert(`Toplu güncelleme tamamlandı!\n\nBaşarılı: ${successCount}\nBaşarısız: ${errorCount}`)
+    setSelectedProducts(new Set())
+    setShowBulkEdit(false)
+    setBulkEditData({ currency: '', unit: '', price_multiplier: '1.0' })
+    loadProducts()
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedProducts.size === 0) {
+      alert('Lütfen en az bir ürün seçin')
+      return
+    }
+
+    if (!confirm(`${selectedProducts.size} ürün SİLİNECEK!\n\nUYARI: Bu ürünleri kullanan teklifler varsa silme işlemi başarısız olacaktır.\n\nEmin misiniz?`)) {
+      return
+    }
+
+    let successCount = 0
+    let errorCount = 0
+
+    for (const productId of selectedProducts) {
+      const { error } = await supabase
+        .from('products')
+        .delete()
+        .eq('id', productId)
+
+      if (error) {
+        errorCount++
+      } else {
+        successCount++
+      }
+    }
+
+    alert(`Toplu silme tamamlandı!\n\nBaşarılı: ${successCount}\nBaşarısız: ${errorCount}`)
+    setSelectedProducts(new Set())
+    loadProducts()
   }
 
   const getCurrencySymbol = (currency: string) => {
@@ -316,11 +482,105 @@ export default function ProductsPage() {
         </div>
       </div>
 
+      {/* Bulk Edit Toolbar */}
+      {selectedProducts.size > 0 && (
+        <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-4">
+              <span className="font-semibold text-blue-900">
+                {selectedProducts.size} ürün seçildi
+              </span>
+              <button
+                onClick={() => setShowBulkEdit(!showBulkEdit)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+              >
+                {showBulkEdit ? '✕ İptal' : '✏️ Toplu Düzenle'}
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+              >
+                🗑️ Toplu Sil
+              </button>
+            </div>
+            <button
+              onClick={() => setSelectedProducts(new Set())}
+              className="text-sm text-blue-700 hover:underline"
+            >
+              Seçimi Temizle
+            </button>
+          </div>
+
+          {showBulkEdit && (
+            <div className="bg-white p-4 rounded-lg border border-blue-200">
+              <h3 className="font-semibold mb-3">Toplu Güncelleme</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Para Birimi Değiştir <span className="text-gray-400">(boş bırakılırsa değişmez)</span>
+                  </label>
+                  <select
+                    value={bulkEditData.currency}
+                    onChange={(e) => setBulkEditData({...bulkEditData, currency: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  >
+                    <option value="">-- Değiştirme --</option>
+                    <option value="TL">TL (₺)</option>
+                    <option value="USD">USD ($)</option>
+                    <option value="EUR">EUR (€)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Birim Değiştir <span className="text-gray-400">(boş bırakılırsa değişmez)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={bulkEditData.unit}
+                    onChange={(e) => setBulkEditData({...bulkEditData, unit: e.target.value})}
+                    placeholder="Örn: adet, metre, kg"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Fiyat Çarpanı <span className="text-gray-400">(1.1 = %10 artış, 0.9 = %10 indirim)</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={bulkEditData.price_multiplier}
+                    onChange={(e) => setBulkEditData({...bulkEditData, price_multiplier: e.target.value})}
+                    placeholder="1.0"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+              </div>
+              <button
+                onClick={handleBulkUpdate}
+                className="mt-4 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              >
+                Güncelle
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Products Table */}
       <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b bg-gray-50">
+              <th className="text-center p-3 w-12">
+                <input
+                  type="checkbox"
+                  checked={selectedProducts.size === products.length && products.length > 0}
+                  onChange={selectAll}
+                  className="w-4 h-4 text-blue-600 cursor-pointer"
+                  title={selectedProducts.size === products.length ? 'Tümünü Kaldır' : 'Tümünü Seç'}
+                />
+              </th>
               <th className="text-left p-3">Kod</th>
               <th className="text-left p-3">Tip</th>
               <th className="text-left p-3">Çap</th>
@@ -333,6 +593,14 @@ export default function ProductsPage() {
           <tbody>
             {products.map(product => (
               <tr key={product.id} className="border-b hover:bg-gray-50">
+                <td className="p-3 text-center">
+                  <input
+                    type="checkbox"
+                    checked={selectedProducts.has(product.id)}
+                    onChange={() => toggleProductSelection(product.id)}
+                    className="w-4 h-4 text-blue-600 cursor-pointer"
+                  />
+                </td>
                 <td className="p-3 font-medium">{product.product_code}</td>
                 <td className="p-3">
                   <div className="flex items-center gap-2">
@@ -347,7 +615,7 @@ export default function ProductsPage() {
                 <td className="p-3">{product.diameter || '-'}</td>
                 <td className="p-3 text-right">
                   <div className="flex items-center justify-end gap-2">
-                    <span className="font-medium">{product.base_price.toFixed(2)} {getCurrencySymbol(product.currency)}</span>
+                    <span className="font-medium">{product.base_price.toFixed(2)}{getCurrencySymbol(product.currency)}</span>
                     {product.base_price === 0 && (
                       <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded whitespace-nowrap">
                         ⚠️ Fiyat sorunuz

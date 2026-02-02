@@ -93,7 +93,7 @@ export default function RootLayout({
                 className="block px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg min-h-[44px] flex items-center"
                 onClick={() => setMobileMenuOpen(false)}
               >
-                Excel Import
+                Dosya Yükle
               </a>
             </nav>
           </aside>

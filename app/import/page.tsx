@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import * as XLSX from 'xlsx'
+import Papa from 'papaparse'
+import { supabase } from '@/lib/supabase'
 
 type ProductRow = {
   product_type: string
@@ -18,6 +20,17 @@ type ImportError = {
   error: string
 }
 
+type ImportHistory = {
+  id: string
+  file_name: string
+  file_size: number
+  total_products: number
+  successful_imports: number
+  failed_imports: number
+  error_log: any
+  created_at: string
+}
+
 export default function ImportPage() {
   const [file, setFile] = useState<File | null>(null)
   const [sheetNames, setSheetNames] = useState<string[]>([])
@@ -26,6 +39,63 @@ export default function ImportPage() {
   const [importing, setImporting] = useState(false)
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0, currentSheet: '' })
   const [result, setResult] = useState<{ success: number; failed: number; errors?: ImportError[] } | null>(null)
+
+  // Upload history state
+  const [showHistory, setShowHistory] = useState(false)
+  const [importHistory, setImportHistory] = useState<ImportHistory[]>([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
+
+  const parseProductRow = (row: any): ProductRow => {
+    const diameter = row['Çap'] || row['diameter'] || row['Cap']
+    return {
+      product_type: String(row['Ürün Tipi'] || row['product_type'] || row['Urun Tipi'] || row['ÜRÜN TİPİ'] || row['URUN TIPI'] || ''),
+      diameter: diameter ? String(diameter) : null,
+      product_code: String(row['Ürün Kodu'] || row['product_code'] || row['Urun Kodu'] || row['ÜRÜN KODU'] || row['URUN KODU'] || row['Kod'] || row['KOD'] || ''),
+      base_price: Number(row['Birim Fiyat'] || row['base_price'] || row['Fiyat'] || row['FIYAT'] || 0),
+      currency: String(row['Para Birimi'] || row['currency'] || row['Para Birim'] || 'TL'),
+      unit: String(row['Birim'] || row['unit'] || row['BIRIM'] || 'adet'),
+      description: String(row['Açıklama'] || row['description'] || row['AÇIKLAMA'] || ''),
+    }
+  }
+
+  const loadImportHistory = async () => {
+    setLoadingHistory(true)
+    try {
+      const { data, error } = await supabase
+        .from('import_history')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50)
+
+      if (error) {
+        console.error('Import geçmişi yüklenemedi:', error)
+        alert('Import geçmişi yüklenemedi: ' + error.message)
+      } else {
+        setImportHistory(data || [])
+      }
+    } finally {
+      setLoadingHistory(false)
+    }
+  }
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes'
+    const k = 1024
+    const sizes = ['Bytes', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
+  }
+
+  const formatDate = (dateString: string): string => {
+    const date = new Date(dateString)
+    return date.toLocaleString('tr-TR', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
@@ -36,40 +106,56 @@ export default function ImportPage() {
     setPreview([])
     setSelectedSheets([])
 
-    // Parse Excel
-    const data = await selectedFile.arrayBuffer()
-    const workbook = XLSX.read(data)
+    const fileName = selectedFile.name.toLowerCase()
+    const isCSV = fileName.endsWith('.csv')
 
-    // Tüm sheet isimlerini al
-    setSheetNames(workbook.SheetNames)
+    if (isCSV) {
+      // Parse CSV
+      Papa.parse(selectedFile, {
+        header: true,
+        complete: (results) => {
+          const jsonData = results.data as any[]
+          const products: ProductRow[] = jsonData
+            .filter(row => row['Ürün Kodu'] || row['product_code'] || row['Urun Kodu']) // Boş satırları filtrele
+            .map(parseProductRow)
 
-    // İlk sheet'i otomatik seç ve önizle
-    if (workbook.SheetNames.length > 0) {
-      const firstSheet = workbook.SheetNames[0]
-      setSelectedSheets([firstSheet])
-
-      const worksheet = workbook.Sheets[firstSheet]
-      const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[]
-
-      // Convert to our format
-      const products: ProductRow[] = jsonData.map((row) => {
-        const diameter = row['Çap'] || row['diameter']
-        return {
-          product_type: String(row['Ürün Tipi'] || row['product_type'] || ''),
-          diameter: diameter ? String(diameter) : null,
-          product_code: String(row['Ürün Kodu'] || row['product_code'] || ''),
-          base_price: Number(row['Birim Fiyat'] || row['base_price'] || 0),
-          currency: String(row['Para Birimi'] || row['currency'] || 'TL'),
-          unit: String(row['Birim'] || row['unit'] || ''),
-          description: String(row['Açıklama'] || row['description'] || ''),
+          setPreview(products.slice(0, 10))
+          setSheetNames(['CSV'])
+          setSelectedSheets(['CSV'])
+        },
+        error: (error) => {
+          console.error('CSV parse hatası:', error)
+          alert('CSV dosyası okunamadı: ' + error.message)
         }
       })
+    } else {
+      // Parse Excel
+      const data = await selectedFile.arrayBuffer()
+      const workbook = XLSX.read(data)
 
-      setPreview(products.slice(0, 10)) // İlk 10 satırı göster
+      // Tüm sheet isimlerini al
+      setSheetNames(workbook.SheetNames)
+
+      // İlk sheet'i otomatik seç ve önizle
+      if (workbook.SheetNames.length > 0) {
+        const firstSheet = workbook.SheetNames[0]
+        setSelectedSheets([firstSheet])
+
+        const worksheet = workbook.Sheets[firstSheet]
+        const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[]
+
+        // Convert to our format
+        const products: ProductRow[] = jsonData.map(parseProductRow)
+
+        setPreview(products.slice(0, 10)) // İlk 10 satırı göster
+      }
     }
   }
 
   const handleSheetSelection = async (sheetName: string, checked: boolean) => {
+    // CSV için sheet selection atla (sadece tek sheet var)
+    if (file && file.name.toLowerCase().endsWith('.csv')) return
+
     let newSelection: string[]
 
     if (checked) {
@@ -87,18 +173,7 @@ export default function ImportPage() {
       const worksheet = workbook.Sheets[newSelection[0]]
       const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[]
 
-      const products: ProductRow[] = jsonData.map((row) => {
-        const diameter = row['Çap'] || row['diameter']
-        return {
-          product_type: String(row['Ürün Tipi'] || row['product_type'] || ''),
-          diameter: diameter ? String(diameter) : null,
-          product_code: String(row['Ürün Kodu'] || row['product_code'] || ''),
-          base_price: Number(row['Birim Fiyat'] || row['base_price'] || 0),
-          currency: String(row['Para Birimi'] || row['currency'] || 'TL'),
-          unit: String(row['Birim'] || row['unit'] || ''),
-          description: String(row['Açıklama'] || row['description'] || ''),
-        }
-      })
+      const products: ProductRow[] = jsonData.map(parseProductRow)
 
       setPreview(products.slice(0, 10))
     } else {
@@ -114,51 +189,75 @@ export default function ImportPage() {
     setImportProgress({ current: 0, total: selectedSheets.length, currentSheet: '' })
 
     try {
-      const data = await file.arrayBuffer()
-      const workbook = XLSX.read(data)
-
-      // Tüm seçili sheet'lerden ürünleri topla
+      const fileName = file.name.toLowerCase()
+      const isCSV = fileName.endsWith('.csv')
       let allProducts: ProductRow[] = []
 
-      for (let i = 0; i < selectedSheets.length; i++) {
-        const sheetName = selectedSheets[i]
-        setImportProgress({ current: i + 1, total: selectedSheets.length, currentSheet: sheetName })
+      if (isCSV) {
+        // CSV import
+        setImportProgress({ current: 1, total: 1, currentSheet: 'CSV dosyası işleniyor...' })
 
-        console.log(`[${i + 1}/${selectedSheets.length}] İşleniyor: ${sheetName}`)
+        await new Promise<void>((resolve, reject) => {
+          Papa.parse(file, {
+            header: true,
+            complete: (results) => {
+              const jsonData = results.data as any[]
+              console.log(`CSV: ${jsonData.length} satır bulundu`)
 
-        const worksheet = workbook.Sheets[sheetName]
-        const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[]
+              // İlk satırın sütun isimlerini göster
+              if (jsonData.length > 0) {
+                console.log('CSV sütun isimleri:', Object.keys(jsonData[0]))
+              }
 
-        console.log(`  → ${sheetName}: ${jsonData.length} satır bulundu`)
+              const products: ProductRow[] = jsonData
+                .filter(row => row['Ürün Kodu'] || row['product_code'] || row['Urun Kodu'])
+                .map(parseProductRow)
 
-        // İlk satırın sütun isimlerini göster (debug için)
-        if (jsonData.length > 0 && i === 0) {
-          console.log('  → İlk satırdaki sütun isimleri:', Object.keys(jsonData[0]))
-        }
-
-        const products: ProductRow[] = jsonData.map((row, rowIndex) => {
-          const diameter = row['Çap'] || row['diameter'] || row['Cap']
-          const product_type = String(row['Ürün Tipi'] || row['product_type'] || row['Urun Tipi'] || row['ÜRÜN TİPİ'] || row['URUN TIPI'] || '')
-          const product_code = String(row['Ürün Kodu'] || row['product_code'] || row['Urun Kodu'] || row['ÜRÜN KODU'] || row['URUN KODU'] || row['Kod'] || row['KOD'] || '')
-
-          // Debug için ilk 3 satırda boş değerleri logla
-          if (i === 0 && rowIndex < 3 && (!product_type || !product_code)) {
-            console.warn(`  ⚠️ Satır ${rowIndex + 1}: Tip='${product_type}' Kod='${product_code}'`)
-            console.warn(`     Satır ham verisi:`, row)
-          }
-
-          return {
-            product_type,
-            diameter: diameter ? String(diameter) : null,
-            product_code,
-            base_price: Number(row['Birim Fiyat'] || row['base_price'] || row['Fiyat'] || row['FIYAT'] || 0),
-            currency: String(row['Para Birimi'] || row['currency'] || row['Para Birim'] || row['Birim'] || 'TL'),
-            unit: String(row['Birim'] || row['unit'] || row['BIRIM'] || 'adet'),
-            description: String(row['Açıklama'] || row['description'] || row['AÇIKLAMA'] || ''),
-          }
+              allProducts = products
+              resolve()
+            },
+            error: (error) => {
+              console.error('CSV parse hatası:', error)
+              reject(error)
+            }
+          })
         })
+      } else {
+        // Excel import
+        const data = await file.arrayBuffer()
+        const workbook = XLSX.read(data)
 
-        allProducts = allProducts.concat(products)
+        // Tüm seçili sheet'lerden ürünleri topla
+        for (let i = 0; i < selectedSheets.length; i++) {
+          const sheetName = selectedSheets[i]
+          setImportProgress({ current: i + 1, total: selectedSheets.length, currentSheet: sheetName })
+
+          console.log(`[${i + 1}/${selectedSheets.length}] İşleniyor: ${sheetName}`)
+
+          const worksheet = workbook.Sheets[sheetName]
+          const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[]
+
+          console.log(`  → ${sheetName}: ${jsonData.length} satır bulundu`)
+
+          // İlk satırın sütun isimlerini göster (debug için)
+          if (jsonData.length > 0 && i === 0) {
+            console.log('  → İlk satırdaki sütun isimleri:', Object.keys(jsonData[0]))
+          }
+
+          const products: ProductRow[] = jsonData.map((row, rowIndex) => {
+            const product = parseProductRow(row)
+
+            // Debug için ilk 3 satırda boş değerleri logla
+            if (i === 0 && rowIndex < 3 && (!product.product_type || !product.product_code)) {
+              console.warn(`  ⚠️ Satır ${rowIndex + 1}: Tip='${product.product_type}' Kod='${product.product_code}'`)
+              console.warn(`     Satır ham verisi:`, row)
+            }
+
+            return product
+          })
+
+          allProducts = allProducts.concat(products)
+        }
       }
 
       console.log(`Toplam ${allProducts.length} ürün veritabanına gönderiliyor...`)
@@ -184,17 +283,96 @@ export default function ImportPage() {
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-gray-800 mb-6">Excel Import</h1>
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold text-gray-800">Dosya Yükle</h1>
+        <button
+          onClick={() => {
+            setShowHistory(!showHistory)
+            if (!showHistory) loadImportHistory()
+          }}
+          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+        >
+          {showHistory ? '✕ Kapat' : '📋 Yükleme Geçmişi'}
+        </button>
+      </div>
+
+      {/* Upload History */}
+      {showHistory && (
+        <div className="bg-white p-6 rounded-lg border border-gray-200 mb-6">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-semibold">Yükleme Geçmişi</h2>
+            <button
+              onClick={loadImportHistory}
+              disabled={loadingHistory}
+              className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50"
+            >
+              {loadingHistory ? '⏳ Yükleniyor...' : '🔄 Yenile'}
+            </button>
+          </div>
+
+          {importHistory.length === 0 ? (
+            <p className="text-gray-500 text-center py-8">Henüz import işlemi yapılmamış</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-gray-50">
+                    <th className="text-left p-3">Dosya Adı</th>
+                    <th className="text-center p-3">Toplam</th>
+                    <th className="text-center p-3">Başarılı</th>
+                    <th className="text-center p-3">Başarısız</th>
+                    <th className="text-right p-3">Boyut</th>
+                    <th className="text-left p-3">Tarih</th>
+                    <th className="text-center p-3">İşlem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {importHistory.map((history) => (
+                    <tr key={history.id} className="border-b hover:bg-gray-50">
+                      <td className="p-3 font-medium">{history.file_name}</td>
+                      <td className="p-3 text-center">{history.total_products}</td>
+                      <td className="p-3 text-center text-green-600 font-semibold">
+                        {history.successful_imports}
+                      </td>
+                      <td className="p-3 text-center text-red-600 font-semibold">
+                        {history.failed_imports}
+                      </td>
+                      <td className="p-3 text-right text-gray-600">
+                        {formatFileSize(history.file_size)}
+                      </td>
+                      <td className="p-3 text-gray-600">
+                        {formatDate(history.created_at)}
+                      </td>
+                      <td className="p-3 text-center">
+                        {history.failed_imports > 0 && history.error_log && (
+                          <button
+                            onClick={() => {
+                              alert(JSON.stringify(history.error_log, null, 2))
+                            }}
+                            className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200"
+                          >
+                            Hata Logları
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="bg-white p-6 rounded-lg border border-gray-200 mb-6">
-        <h2 className="text-lg font-semibold mb-4">Excel Formatı</h2>
+        <h2 className="text-lg font-semibold mb-4">Dosya Formatı (Excel veya CSV)</h2>
         <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded text-sm">
           <p className="text-blue-800">
             ℹ️ <strong>İpucu:</strong> Büyük dosyalarda ilerlemeyi takip etmek için tarayıcınızın geliştirici konsolunu açın (F12) ve Console sekmesine bakın.
           </p>
         </div>
         <div className="bg-gray-50 p-4 rounded text-sm">
-          <p className="mb-2">Excel dosyanız aşağıdaki sütunları içermelidir:</p>
+          <p className="mb-2">Excel (.xlsx, .xls) veya CSV (.csv) dosyanız aşağıdaki sütunları içermelidir:</p>
           <ul className="list-disc list-inside space-y-1 text-gray-600">
             <li><strong>Ürün Tipi</strong> veya <strong>product_type</strong> (Zorunlu)</li>
             <li><strong>Ürün Kodu</strong> veya <strong>product_code</strong> (Zorunlu, Benzersiz olmalı)</li>
@@ -215,7 +393,7 @@ export default function ImportPage() {
 
         <input
           type="file"
-          accept=".xlsx,.xls"
+          accept=".xlsx,.xls,.csv"
           onChange={handleFileChange}
           className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
         />

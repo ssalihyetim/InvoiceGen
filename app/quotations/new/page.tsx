@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx'
 import ImageUploadTab from '@/components/quotations/ImageUploadTab'
 import ProductSelectionModal from '@/components/quotations/ProductSelectionModal'
 import BatchMultiMatchModal from '@/components/quotations/BatchMultiMatchModal'
+import { generateQuotationPDF } from '@/lib/pdf-generator'
 
 type Company = {
   id: string
@@ -439,8 +440,8 @@ export default function NewQuotationPage() {
       const totals = calculateTotals()
 
       // Teklif oluştur
-      const { data: quotation, error: quotationError } = await supabase
-        .from('quotations')
+      const { data: quotation, error: quotationError } = await (supabase
+        .from('quotations') as any)
         .insert({
           company_id: selectedCompany,
           quotation_number: '', // Trigger otomatik oluşturacak
@@ -468,8 +469,8 @@ export default function NewQuotationPage() {
         original_request: item.original_request || null
       }))
 
-      const { error: itemsError } = await supabase
-        .from('quotation_items')
+      const { error: itemsError } = await (supabase
+        .from('quotation_items') as any)
         .insert(quotationItems)
 
       if (itemsError) throw itemsError
@@ -485,6 +486,39 @@ export default function NewQuotationPage() {
       alert('Teklif kaydedilirken hata oluştu')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleExportPDF = () => {
+    if (!selectedCompany || items.length === 0) {
+      alert('Lütfen firma seçin ve en az bir ürün ekleyin')
+      return
+    }
+
+    // Get company info
+    const company = companies.find(c => c.id === selectedCompany)
+    if (!company) {
+      alert('Firma bilgisi bulunamadı')
+      return
+    }
+
+    // Generate preview quotation number
+    const previewNumber = `ÖNIZLEME-${new Date().getTime()}`
+
+    try {
+      generateQuotationPDF(
+        {
+          name: company.name,
+          email: null,
+          phone: null,
+          tax_number: null
+        },
+        items,
+        previewNumber
+      )
+    } catch (error) {
+      console.error('PDF export error:', error)
+      alert('PDF oluşturulurken hata oluştu')
     }
   }
 
@@ -621,7 +655,7 @@ export default function NewQuotationPage() {
         {/* Görsel Yükleme */}
         {activeTab === 'image' && (
           <ImageUploadTab
-            products={products}
+            products={products as any}
             onProductsExtracted={handleImageProductsExtracted}
           />
         )}
@@ -657,7 +691,7 @@ export default function NewQuotationPage() {
                       <td className="p-3">{product.diameter || '-'}</td>
                       <td className="p-3 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <span>{product.base_price.toFixed(2)} {getCurrencySymbol(product.currency)}</span>
+                          <span>{product.base_price.toFixed(2)}{getCurrencySymbol(product.currency)}</span>
                           {product.base_price === 0 && (
                             <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded whitespace-nowrap">
                               ⚠️ Fiyat sorunuz
@@ -699,7 +733,7 @@ export default function NewQuotationPage() {
                         <p className="text-sm text-gray-600 mt-1">Çap: {product.diameter}</p>
                       )}
                       <div className="font-bold text-gray-900 mt-2 flex items-center gap-2">
-                        <span>{product.base_price.toFixed(2)} {getCurrencySymbol(product.currency)}</span>
+                        <span>{product.base_price.toFixed(2)}{getCurrencySymbol(product.currency)}</span>
                         {product.base_price === 0 && (
                           <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded whitespace-nowrap">
                             ⚠️ Fiyat sorunuz
@@ -758,7 +792,7 @@ export default function NewQuotationPage() {
                     <td className="py-2 px-2">{item.product?.product_code}</td>
                     <td className="py-2 px-2 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <span>{(item.product?.base_price || 0).toFixed(2)} {getCurrencySymbol(item.product?.currency || 'TL')}</span>
+                        <span>{(item.product?.base_price || 0).toFixed(2)}{getCurrencySymbol(item.product?.currency || 'TL')}</span>
                         {(item.product?.base_price || 0) === 0 && (
                           <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded whitespace-nowrap">
                             ⚠️ Fiyat sorunuz
@@ -788,7 +822,7 @@ export default function NewQuotationPage() {
                       />
                     </td>
                     <td className="py-2 px-2 text-right font-semibold">
-                      {calculateItemTotal(item).toFixed(2)} {getCurrencySymbol(item.product?.currency || 'TL')}
+                      {calculateItemTotal(item).toFixed(2)}{getCurrencySymbol(item.product?.currency || 'TL')}
                     </td>
                     <td className="py-2 px-2 text-center">
                       <button
@@ -837,7 +871,7 @@ export default function NewQuotationPage() {
                   <div>
                     <label className="text-gray-600 block mb-1">Birim Fiyat</label>
                     <div className="font-semibold flex items-center gap-2">
-                      <span>{(item.product?.base_price || 0).toFixed(2)} {getCurrencySymbol(item.product?.currency || 'TL')}</span>
+                      <span>{(item.product?.base_price || 0).toFixed(2)}{getCurrencySymbol(item.product?.currency || 'TL')}</span>
                       {(item.product?.base_price || 0) === 0 && (
                         <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded whitespace-nowrap">
                           ⚠️ Fiyat sorunuz
@@ -848,7 +882,7 @@ export default function NewQuotationPage() {
                   <div>
                     <label className="text-gray-600 block mb-1">Toplam</label>
                     <div className="font-bold text-blue-600">
-                      {calculateItemTotal(item).toFixed(2)} {getCurrencySymbol(item.product?.currency || 'TL')}
+                      {calculateItemTotal(item).toFixed(2)}{getCurrencySymbol(item.product?.currency || 'TL')}
                     </div>
                   </div>
                 </div>
@@ -891,15 +925,15 @@ export default function NewQuotationPage() {
                     <div className="text-sm font-semibold text-gray-600 mb-2">{currency} Para Birimi</div>
                     <div className="flex justify-between text-sm">
                       <span>Ara Toplam:</span>
-                      <span>{amounts.total.toFixed(2)} {getCurrencySymbol(currency)}</span>
+                      <span>{amounts.total.toFixed(2)}{getCurrencySymbol(currency)}</span>
                     </div>
                     <div className="flex justify-between text-sm text-red-600">
                       <span>İskonto:</span>
-                      <span>-{amounts.discount.toFixed(2)} {getCurrencySymbol(currency)}</span>
+                      <span>-{amounts.discount.toFixed(2)}{getCurrencySymbol(currency)}</span>
                     </div>
                     <div className="flex justify-between text-lg font-bold border-t pt-2">
                       <span>TOPLAM ({currency}):</span>
-                      <span>{amounts.final.toFixed(2)} {getCurrencySymbol(currency)}</span>
+                      <span>{amounts.final.toFixed(2)}{getCurrencySymbol(currency)}</span>
                     </div>
                   </div>
                 ))
@@ -914,6 +948,13 @@ export default function NewQuotationPage() {
               className="w-full sm:w-auto px-8 py-4 bg-green-600 text-white rounded-lg hover:bg-green-700 active:bg-green-800 disabled:bg-gray-400 font-semibold text-lg shadow-md min-h-[56px]"
             >
               {saving ? '⏳ Kaydediliyor...' : '✓ Teklifi Kaydet'}
+            </button>
+            <button
+              onClick={handleExportPDF}
+              disabled={items.length === 0 || !selectedCompany}
+              className="w-full sm:w-auto px-8 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-400 font-semibold text-lg shadow-md min-h-[56px]"
+            >
+              📄 PDF İndir
             </button>
           </div>
         </div>
