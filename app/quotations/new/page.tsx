@@ -515,12 +515,12 @@ export default function NewQuotationPage() {
       <h1 className="text-3xl font-bold text-gray-800 mb-6">Yeni Teklif Oluştur</h1>
 
       {/* Firma Seçimi */}
-      <div className="bg-white p-6 rounded-lg border border-gray-200 mb-6">
+      <div className="bg-white p-4 sm:p-6 rounded-lg border border-gray-200 mb-4 sm:mb-6">
         <h2 className="text-lg font-semibold mb-4">1. Firma Seçin</h2>
         <select
           value={selectedCompany}
           onChange={(e) => setSelectedCompany(e.target.value)}
-          className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+          className="w-full px-4 py-3 border border-gray-300 rounded-lg min-h-[44px] text-base"
         >
           <option value="">Firma seçin...</option>
           {companies.map(company => (
@@ -530,47 +530,68 @@ export default function NewQuotationPage() {
       </div>
 
       {/* Ürün Ekleme Yöntemleri */}
-      <div className="bg-white p-6 rounded-lg border border-gray-200 mb-6">
+      <div className="bg-white p-4 sm:p-6 rounded-lg border border-gray-200 mb-4 sm:mb-6">
         <h2 className="text-lg font-semibold mb-4">2. Ürün Ekle</h2>
 
         {/* Sekme Butonları */}
-        <div className="flex gap-2 mb-4">
+        <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
           <button
             onClick={() => setActiveTab('ai')}
-            className={`px-4 py-2 rounded-lg ${activeTab === 'ai' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+            className={`
+              px-4 sm:px-6 py-3 rounded-lg font-medium whitespace-nowrap min-h-[44px] flex-shrink-0
+              transition-colors
+              ${activeTab === 'ai'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300'}
+            `}
           >
-            🤖 AI ile Ara
+            <span className="hidden sm:inline">🤖 AI ile Ara</span>
+            <span className="sm:hidden">🤖 AI</span>
           </button>
           <button
             onClick={() => setActiveTab('manual')}
-            className={`px-4 py-2 rounded-lg ${activeTab === 'manual' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+            className={`
+              px-4 sm:px-6 py-3 rounded-lg font-medium whitespace-nowrap min-h-[44px] flex-shrink-0
+              transition-colors
+              ${activeTab === 'manual'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300'}
+            `}
           >
-            📋 Manuel Seç
+            <span className="hidden sm:inline">📋 Manuel Seç</span>
+            <span className="sm:hidden">📋 Manuel</span>
           </button>
           <button
             onClick={() => setActiveTab('image')}
-            className={`px-4 py-2 rounded-lg ${activeTab === 'image' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+            className={`
+              px-4 sm:px-6 py-3 rounded-lg font-medium whitespace-nowrap min-h-[44px] flex-shrink-0
+              transition-colors
+              ${activeTab === 'image'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300'}
+            `}
           >
-            📷 Görsel Yükle
+            <span className="hidden sm:inline">📷 Görsel Yükle</span>
+            <span className="sm:hidden">📷 Görsel</span>
           </button>
         </div>
 
         {/* AI Arama */}
         {activeTab === 'ai' && (
           <div>
-            <div className="flex gap-2 mb-4">
+            <div className="flex flex-col sm:flex-row gap-3 mb-4">
               <input
                 type="text"
                 value={customerRequest}
                 onChange={(e) => setCustomerRequest(e.target.value)}
                 placeholder="Örn: 1/2 inç plastik boru 50 metre"
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg"
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg min-h-[44px] text-base"
                 onKeyPress={(e) => e.key === 'Enter' && handleAISearch()}
               />
               <button
                 onClick={handleAISearch}
                 disabled={searching || !customerRequest.trim()}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400"
+                className="w-full sm:w-auto px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 active:bg-blue-800 font-medium min-h-[44px] min-w-[120px]"
               >
                 {searching ? 'Aranıyor...' : 'AI ile Bul'}
               </button>
@@ -588,7 +609,7 @@ export default function NewQuotationPage() {
                 type="file"
                 accept=".xlsx,.xls"
                 onChange={handleExcelUpload}
-                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
+                className="block w-full text-sm text-gray-500 file:mr-4 file:py-3 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100 file:min-h-[44px]"
               />
               <p className="text-xs text-gray-500 mt-1">
                 Excel: "Müşteri Talebi" ve "Miktar" sütunları
@@ -613,10 +634,11 @@ export default function NewQuotationPage() {
               value={productSearch}
               onChange={(e) => setProductSearch(e.target.value)}
               placeholder="Ürün ara (kod, tip, çap)..."
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg mb-4 min-h-[44px] text-base"
             />
 
-            <div className="max-h-96 overflow-y-auto border border-gray-200 rounded-lg">
+            {/* Desktop Tablo */}
+            <div className="hidden lg:block max-h-96 overflow-y-auto border border-gray-200 rounded-lg">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 sticky top-0">
                   <tr>
@@ -664,16 +686,56 @@ export default function NewQuotationPage() {
                 </div>
               )}
             </div>
+
+            {/* Mobil Card View */}
+            <div className="lg:hidden max-h-96 overflow-y-auto space-y-3">
+              {filteredProducts.map(product => (
+                <div key={product.id} className="border rounded-lg p-4 bg-white hover:bg-gray-50 active:bg-gray-100">
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold truncate">{product.product_type}</h3>
+                      <p className="text-sm text-gray-600 font-mono mt-1">{product.product_code}</p>
+                      {product.diameter && (
+                        <p className="text-sm text-gray-600 mt-1">Çap: {product.diameter}</p>
+                      )}
+                      <div className="font-bold text-gray-900 mt-2 flex items-center gap-2">
+                        <span>{product.base_price.toFixed(2)} {getCurrencySymbol(product.currency)}</span>
+                        {product.base_price === 0 && (
+                          <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded whitespace-nowrap">
+                            ⚠️ Fiyat sorunuz
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        addItem(product, false, '')
+                        setActiveTab('ai')
+                      }}
+                      className="ml-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:bg-blue-800 font-medium min-h-[44px] min-w-[80px]"
+                    >
+                      Ekle
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {filteredProducts.length === 0 && (
+                <div className="p-8 text-center text-gray-500">
+                  Ürün bulunamadı
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
 
       {/* Teklif Kalemleri */}
       {items.length > 0 && (
-        <div className="bg-white p-6 rounded-lg border border-gray-200 mb-6">
+        <div className="bg-white p-4 sm:p-6 rounded-lg border border-gray-200 mb-4 sm:mb-6">
           <h2 className="text-lg font-semibold mb-4">3. Teklif Kalemleri</h2>
 
-          <div className="overflow-x-auto">
+          {/* Desktop Tablo */}
+          <div className="hidden lg:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b">
@@ -742,12 +804,90 @@ export default function NewQuotationPage() {
             </table>
           </div>
 
+          {/* Mobil Card View */}
+          <div className="lg:hidden space-y-4">
+            {items.filter(item => item.product).map((item, index) => (
+              <div key={index} className="border rounded-lg p-4 bg-gray-50">
+                {/* Ürün Başlığı */}
+                <div className="flex justify-between items-start mb-3">
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-gray-900">
+                      {item.product?.product_type}
+                      {item.product?.diameter && ` - ${item.product.diameter}`}
+                    </h3>
+                    <p className="text-sm text-gray-600 font-mono mt-1">
+                      {item.product?.product_code}
+                    </p>
+                    {item.ai_matched && (
+                      <span className="inline-block mt-2 text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
+                        AI Eşleşti
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => removeItem(index)}
+                    className="ml-3 text-red-600 p-2 min-w-[44px] min-h-[44px] hover:bg-red-50 rounded-lg active:bg-red-100"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Fiyat Bilgileri */}
+                <div className="grid grid-cols-2 gap-3 mb-3 text-sm">
+                  <div>
+                    <label className="text-gray-600 block mb-1">Birim Fiyat</label>
+                    <div className="font-semibold flex items-center gap-2">
+                      <span>{(item.product?.base_price || 0).toFixed(2)} {getCurrencySymbol(item.product?.currency || 'TL')}</span>
+                      {(item.product?.base_price || 0) === 0 && (
+                        <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded whitespace-nowrap">
+                          ⚠️ Fiyat sorunuz
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-gray-600 block mb-1">Toplam</label>
+                    <div className="font-bold text-blue-600">
+                      {calculateItemTotal(item).toFixed(2)} {getCurrencySymbol(item.product?.currency || 'TL')}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Miktar & İskonto */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-600 block mb-1">Miktar</label>
+                    <input
+                      type="number"
+                      value={item.quantity}
+                      onChange={(e) => updateItem(index, 'quantity', Number(e.target.value))}
+                      className="w-full px-3 py-2 border rounded-lg text-center min-h-[44px] text-base"
+                      min="0.01"
+                      step="0.01"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-600 block mb-1">İskonto %</label>
+                    <input
+                      type="number"
+                      value={item.discount_percentage}
+                      onChange={(e) => updateItem(index, 'discount_percentage', Number(e.target.value))}
+                      className="w-full px-3 py-2 border rounded-lg text-center min-h-[44px] text-base"
+                      min="0"
+                      max="100"
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
           {/* Toplamlar - Para Birimi Bazında */}
           <div className="mt-4 border-t pt-4 flex justify-end">
-            <div className="w-80 space-y-4">
+            <div className="w-full sm:w-96 space-y-4">
               {Object.keys(totalsByCurrency).length > 0 && (
                 Object.entries(totalsByCurrency).map(([currency, amounts]) => (
-                  <div key={currency} className="space-y-2">
+                  <div key={currency} className="space-y-2 bg-gray-50 p-4 rounded-lg">
                     <div className="text-sm font-semibold text-gray-600 mb-2">{currency} Para Birimi</div>
                     <div className="flex justify-between text-sm">
                       <span>Ara Toplam:</span>
@@ -767,13 +907,13 @@ export default function NewQuotationPage() {
             </div>
           </div>
 
-          <div className="mt-6 flex gap-4">
+          <div className="mt-6 flex flex-col sm:flex-row gap-3">
             <button
               onClick={handleSave}
               disabled={saving}
-              className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400"
+              className="w-full sm:w-auto px-8 py-4 bg-green-600 text-white rounded-lg hover:bg-green-700 active:bg-green-800 disabled:bg-gray-400 font-semibold text-lg shadow-md min-h-[56px]"
             >
-              {saving ? 'Kaydediliyor...' : 'Teklifi Kaydet'}
+              {saving ? '⏳ Kaydediliyor...' : '✓ Teklifi Kaydet'}
             </button>
           </div>
         </div>

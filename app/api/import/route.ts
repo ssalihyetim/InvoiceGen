@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
           // Upsert kullanarak batch insert (duplicate durumunda update)
           const { error } = await supabase
             .from('products')
-            .upsert(validProducts, {
+            .upsert(validProducts as any, {
               onConflict: 'product_code',
               ignoreDuplicates: false
             })
