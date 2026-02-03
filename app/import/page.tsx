@@ -24,7 +24,7 @@ type ImportHistory = {
   id: string
   file_name: string
   file_size: number
-  total_products: number
+  total_rows: number
   successful_imports: number
   failed_imports: number
   error_log: any
@@ -47,12 +47,35 @@ export default function ImportPage() {
 
   const parseProductRow = (row: any): ProductRow => {
     const diameter = row['Çap'] || row['diameter'] || row['Cap']
+
+    // Enhanced price parsing for Turkish format (1.500,50)
+    let basePrice = 0
+    const priceFields = [
+      'Birim Fiyat', 'base_price', 'Fiyat', 'FIYAT', 'Birim Fiyati',
+      'Unit Price', 'Price', 'BirimFiyat', 'BIRIM_FIYAT'
+    ]
+
+    for (const field of priceFields) {
+      if (row[field] !== undefined && row[field] !== null && row[field] !== '') {
+        let priceStr = String(row[field]).trim()
+        // Turkish format: Remove thousands separator (.), convert comma to dot
+        priceStr = priceStr.replace(/\./g, '').replace(',', '.')
+        basePrice = parseFloat(priceStr) || 0
+        if (basePrice > 0) break
+      }
+    }
+
+    // Normalize currency: TL → TRY
+    let currency = String(row['Para Birimi'] || row['currency'] || row['Para Birim'] || 'TRY').toUpperCase()
+    if (currency === 'TL') currency = 'TRY'
+    if (!['TRY', 'USD', 'EUR'].includes(currency)) currency = 'TRY'
+
     return {
       product_type: String(row['Ürün Tipi'] || row['product_type'] || row['Urun Tipi'] || row['ÜRÜN TİPİ'] || row['URUN TIPI'] || ''),
       diameter: diameter ? String(diameter) : null,
       product_code: String(row['Ürün Kodu'] || row['product_code'] || row['Urun Kodu'] || row['ÜRÜN KODU'] || row['URUN KODU'] || row['Kod'] || row['KOD'] || ''),
-      base_price: Number(row['Birim Fiyat'] || row['base_price'] || row['Fiyat'] || row['FIYAT'] || 0),
-      currency: String(row['Para Birimi'] || row['currency'] || row['Para Birim'] || 'TL'),
+      base_price: basePrice,
+      currency: currency,
       unit: String(row['Birim'] || row['unit'] || row['BIRIM'] || 'adet'),
       description: String(row['Açıklama'] || row['description'] || row['AÇIKLAMA'] || ''),
     }
@@ -266,7 +289,11 @@ export default function ImportPage() {
       const response = await fetch('/api/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ products: allProducts }),
+        body: JSON.stringify({
+          products: allProducts,
+          fileName: file.name,
+          fileSize: file.size
+        }),
       })
 
       const result = await response.json()
@@ -330,7 +357,7 @@ export default function ImportPage() {
                   {importHistory.map((history) => (
                     <tr key={history.id} className="border-b hover:bg-gray-50">
                       <td className="p-3 font-medium">{history.file_name}</td>
-                      <td className="p-3 text-center">{history.total_products}</td>
+                      <td className="p-3 text-center">{history.total_rows}</td>
                       <td className="p-3 text-center text-green-600 font-semibold">
                         {history.successful_imports}
                       </td>

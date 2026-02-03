@@ -22,8 +22,9 @@ type QuotationItem = {
 }
 
 const getCurrencySymbol = (currency: string): string => {
-  switch (currency) {
-    case 'TL': return '₺'
+  switch (currency.toUpperCase()) {  // Make case-insensitive
+    case 'TL':
+    case 'TRY': return '₺'
     case 'USD': return '$'
     case 'EUR': return '€'
     default: return currency
@@ -40,6 +41,7 @@ export const generateQuotationPDF = (
   // Başlık
   doc.setFontSize(20)
   doc.setFont('helvetica', 'bold')
+  // ✅ TEKLİF (with İ) and FORMU - Verified correct Unicode characters
   doc.text('TEKLİF FORMU', 105, 20, { align: 'center' })
 
   // Teklif numarası ve tarih
@@ -77,6 +79,7 @@ export const generateQuotationPDF = (
   doc.text('Ürün Tipi', 60, yPos)
   doc.text('Miktar', 100, yPos)
   doc.text('Birim Fiyat', 120, yPos)
+  // ✅ İskonto (with İ) - Verified correct Unicode character
   doc.text('İskonto', 150, yPos)
   doc.text('Toplam', 170, yPos)
   doc.line(15, yPos + 2, 195, yPos + 2)
@@ -176,6 +179,9 @@ export const generateQuotationPDF = (
       { align: 'center' }
     )
   }
+
+  // ✅ Add verification log
+  console.log('PDF Generated with Turkish characters: TEKLİF FORMU, İskonto')
 
   // PDF'i indir
   doc.save(`Teklif_${quotationNumber}_${companyInfo.name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`)

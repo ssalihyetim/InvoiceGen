@@ -8,6 +8,10 @@ import ProductSelectionModal from '@/components/quotations/ProductSelectionModal
 import BatchMultiMatchModal from '@/components/quotations/BatchMultiMatchModal'
 import { generateQuotationPDF } from '@/lib/pdf-generator'
 
+// Supabase Edge Function URL
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+const MATCH_PRODUCT_URL = `${SUPABASE_URL}/functions/v1/match-product`
+
 type Company = {
   id: string
   name: string
@@ -84,20 +88,17 @@ export default function NewQuotationPage() {
 
     setSearching(true)
     try {
-      const response = await fetch(
-        'https://zsmaltekrsnitlekjxad.supabase.co/functions/v1/match-product',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-          },
-          body: JSON.stringify({
-            customerRequest,
-            companyId: selectedCompany
-          })
-        }
-      )
+      const response = await fetch(MATCH_PRODUCT_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify({
+          customerRequest,
+          companyId: selectedCompany
+        })
+      })
 
       const result = await response.json()
       console.log('AI Result:', result)
@@ -209,17 +210,14 @@ export default function NewQuotationPage() {
 
         if (talep) {
           try {
-            const response = await fetch(
-              'https://zsmaltekrsnitlekjxad.supabase.co/functions/v1/match-product',
-              {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-                },
-                body: JSON.stringify({ customerRequest: talep })
-              }
-            )
+            const response = await fetch(MATCH_PRODUCT_URL, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+              },
+              body: JSON.stringify({ customerRequest: talep })
+            })
 
             const result = await response.json()
             console.log('AI Result for', talep, ':', result)
@@ -309,17 +307,14 @@ export default function NewQuotationPage() {
       console.log('Processing request:', request)
 
       try {
-        const response = await fetch(
-          'https://zsmaltekrsnitlekjxad.supabase.co/functions/v1/match-product',
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-            },
-            body: JSON.stringify({ customerRequest: request.talep })
-          }
-        )
+        const response = await fetch(MATCH_PRODUCT_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+          },
+          body: JSON.stringify({ customerRequest: request.talep })
+        })
 
         const result = await response.json()
         console.log('AI result for', request.talep, ':', result)
@@ -438,24 +433,39 @@ export default function NewQuotationPage() {
     setSaving(true)
     try {
       const totals = calculateTotals()
+      const byCurrency = calculateTotalsByCurrency()
+
+      // Get primary currency (first item's currency or TRY)
+      const primaryCurrency = items[0]?.product?.currency || 'TRY'
 
       // Teklif oluştur
-      const { data: quotation, error: quotationError } = await (supabase
-        .from('quotations') as any)
+      const { data: quotation, error: quotationError } = await supabase
+        .from('quotations')
         .insert({
           company_id: selectedCompany,
-          quotation_number: '', // Trigger otomatik oluşturacak
+          quotation_number: '',  // Trigger will auto-generate
           status: 'draft',
           total_amount: totals.total,
           discount_amount: totals.discount,
-          final_amount: totals.final
+          final_amount: totals.final,
+          currency: primaryCurrency,
+          subtotal: totals.total,
+          notes: null
         })
         .select()
         .single()
 
-      if (quotationError) throw quotationError
+      if (quotationError) {
+        console.error('Quotation insert error:', quotationError)
+        throw quotationError
+      }
 
-      // Teklif kalemlerini ekle (para birimi ile birlikte)
+      // Validate quotation number was generated
+      if (!quotation.quotation_number || quotation.quotation_number === '') {
+        throw new Error('Teklif numarası oluşturulamadı')
+      }
+
+      // Teklif kalemlerini ekle
       const quotationItems = items.map(item => ({
         quotation_id: quotation.id,
         product_id: item.product.id,
@@ -463,17 +473,22 @@ export default function NewQuotationPage() {
         unit_price: item.product.base_price,
         currency: item.product.currency,
         discount_percentage: item.discount_percentage,
-        discount_amount: item.product.base_price * item.quantity * item.discount_percentage / 100,
+        discount_amount: (item.product.base_price * item.quantity * item.discount_percentage / 100),
         subtotal: calculateItemTotal(item),
-        ai_matched: item.ai_matched,
+        ai_matched: item.ai_matched || false,
         original_request: item.original_request || null
       }))
 
-      const { error: itemsError } = await (supabase
-        .from('quotation_items') as any)
+      const { error: itemsError } = await supabase
+        .from('quotation_items')
         .insert(quotationItems)
 
-      if (itemsError) throw itemsError
+      if (itemsError) {
+        console.error('Quotation items insert error:', itemsError)
+        // Rollback: delete the quotation if items fail
+        await supabase.from('quotations').delete().eq('id', quotation.id)
+        throw itemsError
+      }
 
       alert(`Teklif başarıyla oluşturuldu! Teklif No: ${quotation.quotation_number}`)
 
@@ -481,9 +496,10 @@ export default function NewQuotationPage() {
       setSelectedCompany('')
       setItems([])
       setCustomerRequest('')
-    } catch (error) {
+
+    } catch (error: any) {
       console.error('Save error:', error)
-      alert('Teklif kaydedilirken hata oluştu')
+      alert(`Teklif kaydedilirken hata oluştu: ${error.message || 'Bilinmeyen hata'}`)
     } finally {
       setSaving(false)
     }

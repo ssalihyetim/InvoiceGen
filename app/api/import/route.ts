@@ -3,7 +3,8 @@ import { supabase } from '@/lib/supabase'
 
 export async function POST(request: NextRequest) {
   try {
-    const { products } = await request.json()
+    const body = await request.json()
+    const { products, fileName, fileSize } = body
 
     if (!products || !Array.isArray(products)) {
       return NextResponse.json({ error: 'Invalid data' }, { status: 400 })
@@ -48,12 +49,17 @@ export async function POST(request: NextRequest) {
           continue
         }
 
+        // Normalize currency: TL → TRY
+        let currency = (product.currency || 'TRY').toUpperCase()
+        if (currency === 'TL') currency = 'TRY'
+        if (!['TRY', 'USD', 'EUR'].includes(currency)) currency = 'TRY'
+
         const productData = {
           product_type: product.product_type || 'Tanımsız Ürün',  // Boşsa varsayılan değer
           diameter: product.diameter || null,
           product_code: product.product_code,
           base_price: product.base_price || 0,
-          currency: product.currency || 'TL',
+          currency: currency,
           unit: product.unit || 'adet',
           description: product.description || null,
         }
@@ -115,14 +121,24 @@ export async function POST(request: NextRequest) {
     }
 
     // Import geçmişini kaydet
-    await supabase.from('import_history').insert({
-      file_name: 'excel-import',
-      file_size: 0,
-      total_products: products.length,
-      successful_imports: successCount,
-      failed_imports: failedCount,
-      error_log: errors.length > 0 ? errors : null,
-    } as any)
+    try {
+      const { error: historyError } = await supabase
+        .from('import_history')
+        .insert({
+          file_name: fileName || 'Unknown File',
+          file_size: fileSize || 0,
+          total_rows: products.length,
+          successful_imports: successCount,
+          failed_imports: failedCount,
+          error_log: errors.length > 0 ? errors : null,
+        })
+
+      if (historyError) {
+        console.warn('Import history kaydedilemedi:', historyError.message)
+      }
+    } catch (historyErr) {
+      console.warn('Import history error:', historyErr)
+    }
 
     const endTime = Date.now()
     const duration = ((endTime - startTime) / 1000).toFixed(2)
