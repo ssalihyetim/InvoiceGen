@@ -24,9 +24,9 @@ type QuotationItem = {
 const getCurrencySymbol = (currency: string): string => {
   switch (currency.toUpperCase()) {  // Make case-insensitive
     case 'TL':
-    case 'TRY': return 'TL'  // Turkish Lira
-    case 'USD': return '$'   // US Dollar
-    case 'EUR': return 'EUR' // Euro (€ symbol may not render properly)
+    case 'TRY': return String.fromCharCode(0x20BA)  // ₺ (Turkish Lira)
+    case 'USD': return String.fromCharCode(0x0024)  // $ (US Dollar)
+    case 'EUR': return String.fromCharCode(0x20AC)  // € (Euro)
     default: return currency
   }
 }
@@ -59,8 +59,13 @@ export const generateQuotationPDF = (
 ) => {
   const doc = new jsPDF()
 
-  // Don't set any font - use jsPDF default
-  // This ensures proper character rendering without spacing issues
+  // Set document properties for UTF-8 encoding
+  doc.setProperties({
+    title: 'Teklif Formu',
+    subject: 'Teklif',
+  })
+
+  // Don't set font explicitly - use jsPDF default for better character support
 
   // Başlık
   doc.setFontSize(20)
