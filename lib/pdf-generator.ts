@@ -73,7 +73,12 @@ export const generateQuotationPDF = async (
   })
 
   // Try to load custom Roboto font for special characters (₺, €)
+  // Note: Custom font loading is disabled for stability
+  // Using default jsPDF font instead
   let fontLoaded = false
+
+  // Uncomment below to enable custom font (requires debugging)
+  /*
   try {
     console.log('Attempting to load Roboto font...')
     const response = await fetch('/fonts/Roboto-Regular.ttf')
@@ -100,8 +105,9 @@ export const generateQuotationPDF = async (
     console.log('Roboto font loaded successfully!')
   } catch (error) {
     console.error('Failed to load custom font, using default:', error)
-    // Fallback to default font (no setFont call)
+    fontLoaded = false
   }
+  */
 
   // Başlık
   doc.setFontSize(20)
