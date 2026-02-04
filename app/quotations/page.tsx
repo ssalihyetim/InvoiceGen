@@ -15,6 +15,12 @@ type Quotation = {
   companies: {
     name: string
   }
+  quotation_items: {
+    quantity: number
+    unit_price: number
+    currency: string
+    discount_percentage: number
+  }[]
 }
 
 export default function QuotationsPage() {
@@ -35,7 +41,13 @@ export default function QuotationsPage() {
         final_amount,
         currency,
         created_at,
-        companies (name)
+        companies (name),
+        quotation_items (
+          quantity,
+          unit_price,
+          currency,
+          discount_percentage
+        )
       `)
       .order('created_at', { ascending: false })
 
@@ -176,6 +188,25 @@ export default function QuotationsPage() {
     }
   }
 
+  // Calculate totals by currency for each quotation
+  const calculateTotalsByCurrency = (quotation: Quotation) => {
+    const byCurrency: Record<string, number> = {}
+
+    quotation.quotation_items?.forEach(item => {
+      const currency = item.currency || 'TRY'
+      const subtotal = item.unit_price * item.quantity
+      const discount = subtotal * (item.discount_percentage / 100)
+      const total = subtotal - discount
+
+      if (!byCurrency[currency]) {
+        byCurrency[currency] = 0
+      }
+      byCurrency[currency] += total
+    })
+
+    return byCurrency
+  }
+
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
@@ -207,7 +238,34 @@ export default function QuotationsPage() {
                 <td className="p-4">{quotation.companies.name}</td>
                 <td className="p-4">{getStatusBadge(quotation.status)}</td>
                 <td className="p-4 text-right font-semibold">
-                  {(quotation.final_amount || 0).toFixed(2)} {getCurrencySymbol(quotation.currency || 'TRY')}
+                  {(() => {
+                    const totals = calculateTotalsByCurrency(quotation)
+                    const currencies = Object.keys(totals)
+
+                    if (currencies.length === 0) {
+                      return <span className="text-gray-400">0.00 TL</span>
+                    }
+
+                    if (currencies.length === 1) {
+                      const currency = currencies[0]
+                      return (
+                        <span>
+                          {totals[currency].toFixed(2)} {getCurrencySymbol(currency)}
+                        </span>
+                      )
+                    }
+
+                    // Multiple currencies - show each on separate line
+                    return (
+                      <div className="flex flex-col gap-1">
+                        {currencies.map(currency => (
+                          <div key={currency}>
+                            {totals[currency].toFixed(2)} {getCurrencySymbol(currency)}
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })()}
                 </td>
                 <td className="p-4 text-sm text-gray-600">
                   {new Date(quotation.created_at).toLocaleDateString('tr-TR')}

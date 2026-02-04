@@ -24,9 +24,9 @@ type QuotationItem = {
 const getCurrencySymbol = (currency: string): string => {
   switch (currency.toUpperCase()) {  // Make case-insensitive
     case 'TL':
-    case 'TRY': return 'TL'  // Use "TL" instead of ₺ symbol for PDF compatibility
-    case 'USD': return 'USD'
-    case 'EUR': return 'EUR'
+    case 'TRY': return 'TL'  // Turkish Lira
+    case 'USD': return '$'   // US Dollar
+    case 'EUR': return 'EUR' // Euro (€ symbol may not render properly)
     default: return currency
   }
 }
