@@ -115,8 +115,8 @@ export default function QuotationsPage() {
         original_request: item.original_request
       }))
 
-      // Generate PDF
-      generateQuotationPDF(companyInfo, items, quotation.quotation_number)
+      // Generate PDF (async with custom font)
+      await generateQuotationPDF(companyInfo, items, quotation.quotation_number)
 
     } catch (error) {
       console.error('PDF generation error:', error)

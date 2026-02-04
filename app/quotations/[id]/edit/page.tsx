@@ -568,7 +568,7 @@ export default function EditQuotationPage() {
     }
   }
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     if (!selectedCompany || items.length === 0) {
       alert('Lütfen firma seçin ve en az bir ürün ekleyin')
       return
@@ -582,7 +582,7 @@ export default function EditQuotationPage() {
     }
 
     try {
-      generateQuotationPDF(
+      await generateQuotationPDF(
         {
           name: company.name,
           email: null,

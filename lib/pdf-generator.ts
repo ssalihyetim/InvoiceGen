@@ -24,9 +24,9 @@ type QuotationItem = {
 const getCurrencySymbol = (currency: string): string => {
   switch (currency.toUpperCase()) {  // Make case-insensitive
     case 'TL':
-    case 'TRY': return 'TL'  // Turkish Lira (₺ not supported in PDF)
-    case 'USD': return '$'   // US Dollar
-    case 'EUR': return 'EUR' // Euro (€ may not render in all PDF viewers)
+    case 'TRY': return '₺'  // Turkish Lira (custom Roboto font supports this)
+    case 'USD': return '$'  // US Dollar
+    case 'EUR': return '€'  // Euro (custom Roboto font supports this)
     default: return currency
   }
 }
@@ -52,20 +52,34 @@ const sanitizeText = (text: string): string => {
     .trim()
 }
 
-export const generateQuotationPDF = (
+export const generateQuotationPDF = async (
   companyInfo: CompanyInfo,
   items: QuotationItem[],
   quotationNumber: string
 ) => {
   const doc = new jsPDF()
 
-  // Set document properties for UTF-8 encoding
+  // Set document properties
   doc.setProperties({
     title: 'Teklif Formu',
     subject: 'Teklif',
   })
 
-  // Don't set font explicitly - use jsPDF default for better character support
+  // Load custom Roboto font for Turkish Lira symbol support
+  try {
+    const response = await fetch('/fonts/Roboto-Regular.ttf')
+    const arrayBuffer = await response.arrayBuffer()
+    const base64 = btoa(
+      String.fromCharCode(...new Uint8Array(arrayBuffer))
+    )
+
+    doc.addFileToVFS('Roboto-Regular.ttf', base64)
+    doc.addFont('Roboto-Regular.ttf', 'Roboto', 'normal')
+    doc.setFont('Roboto', 'normal')
+  } catch (error) {
+    console.error('Failed to load custom font:', error)
+    // Fallback to default font
+  }
 
   // Başlık
   doc.setFontSize(20)

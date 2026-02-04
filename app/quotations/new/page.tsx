@@ -401,7 +401,7 @@ export default function NewQuotationPage() {
     const byCurrency: Record<string, { total: number, discount: number, final: number }> = {}
 
     items.filter(item => item.product).forEach(item => {
-      const currency = item.product.currency || 'TL'
+      const currency = item.product.currency || 'TRY'  // Changed from 'TL' to 'TRY'
       if (!byCurrency[currency]) {
         byCurrency[currency] = { total: 0, discount: 0, final: 0 }
       }
@@ -418,10 +418,16 @@ export default function NewQuotationPage() {
   }
 
   const calculateTotals = () => {
-    // Legacy function for backward compatibility - returns TL totals only
+    // Returns primary currency totals (TRY first, then fallback to TL for legacy, then first available)
     const byCurrency = calculateTotalsByCurrency()
-    const tlTotals = byCurrency['TL'] || { total: 0, discount: 0, final: 0 }
-    return tlTotals
+
+    // Try TRY first (new standard), fallback to TL (legacy), then first available currency
+    const primaryTotals = byCurrency['TRY'] ||
+                          byCurrency['TL'] ||
+                          Object.values(byCurrency)[0] ||
+                          { total: 0, discount: 0, final: 0 }
+
+    return primaryTotals
   }
 
   const handleSave = async () => {
@@ -505,7 +511,7 @@ export default function NewQuotationPage() {
     }
   }
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     if (!selectedCompany || items.length === 0) {
       alert('Lütfen firma seçin ve en az bir ürün ekleyin')
       return
@@ -522,7 +528,7 @@ export default function NewQuotationPage() {
     const previewNumber = `ÖNIZLEME-${new Date().getTime()}`
 
     try {
-      generateQuotationPDF(
+      await generateQuotationPDF(
         {
           name: company.name,
           email: null,
@@ -553,10 +559,15 @@ export default function NewQuotationPage() {
 
   const getCurrencySymbol = (currency: string) => {
     switch (currency) {
-      case 'TL': return '₺'
-      case 'USD': return '$'
-      case 'EUR': return '€'
-      default: return currency
+      case 'TRY':
+      case 'TL':
+        return '₺'
+      case 'USD':
+        return '$'
+      case 'EUR':
+        return '€'
+      default:
+        return currency
     }
   }
 
