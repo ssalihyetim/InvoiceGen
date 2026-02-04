@@ -239,31 +239,46 @@ export default function QuotationsPage() {
                 <td className="p-4">{getStatusBadge(quotation.status)}</td>
                 <td className="p-4 text-right font-semibold">
                   {(() => {
-                    const totals = calculateTotalsByCurrency(quotation)
-                    const currencies = Object.keys(totals)
+                    // Try to calculate from items first (for multi-currency support)
+                    if (quotation.quotation_items && quotation.quotation_items.length > 0) {
+                      const totals = calculateTotalsByCurrency(quotation)
+                      const currencies = Object.keys(totals)
 
-                    if (currencies.length === 0) {
-                      return <span className="text-gray-400">0.00 TL</span>
-                    }
+                      if (currencies.length === 0) {
+                        // Fallback to main amount
+                        return (
+                          <span>
+                            {(quotation.final_amount || 0).toFixed(2)} {getCurrencySymbol(quotation.currency || 'TRY')}
+                          </span>
+                        )
+                      }
 
-                    if (currencies.length === 1) {
-                      const currency = currencies[0]
+                      if (currencies.length === 1) {
+                        const currency = currencies[0]
+                        return (
+                          <span>
+                            {totals[currency].toFixed(2)} {getCurrencySymbol(currency)}
+                          </span>
+                        )
+                      }
+
+                      // Multiple currencies - show each on separate line
                       return (
-                        <span>
-                          {totals[currency].toFixed(2)} {getCurrencySymbol(currency)}
-                        </span>
+                        <div className="flex flex-col gap-1">
+                          {currencies.map(currency => (
+                            <div key={currency}>
+                              {totals[currency].toFixed(2)} {getCurrencySymbol(currency)}
+                            </div>
+                          ))}
+                        </div>
                       )
                     }
 
-                    // Multiple currencies - show each on separate line
+                    // Fallback: Use main final_amount from quotation
                     return (
-                      <div className="flex flex-col gap-1">
-                        {currencies.map(currency => (
-                          <div key={currency}>
-                            {totals[currency].toFixed(2)} {getCurrencySymbol(currency)}
-                          </div>
-                        ))}
-                      </div>
+                      <span>
+                        {(quotation.final_amount || 0).toFixed(2)} {getCurrencySymbol(quotation.currency || 'TRY')}
+                      </span>
                     )
                   })()}
                 </td>

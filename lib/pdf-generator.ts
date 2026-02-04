@@ -21,13 +21,20 @@ type QuotationItem = {
   original_request?: string
 }
 
-const getCurrencySymbol = (currency: string): string => {
-  switch (currency.toUpperCase()) {  // Make case-insensitive
+// Currency symbol helper - returns symbol or fallback text
+const getCurrencySymbol = (currency: string, fontLoaded: boolean = true): string => {
+  switch (currency.toUpperCase()) {
     case 'TL':
-    case 'TRY': return '₺'  // Turkish Lira (custom Roboto font supports this)
-    case 'USD': return '$'  // US Dollar
-    case 'EUR': return '€'  // Euro (custom Roboto font supports this)
-    default: return currency
+    case 'TRY':
+      // Use symbol if custom font loaded, otherwise use text
+      return fontLoaded ? '₺' : 'TL'
+    case 'USD':
+      return '$'
+    case 'EUR':
+      // Euro symbol may not render in default font
+      return fontLoaded ? '€' : 'EUR'
+    default:
+      return currency
   }
 }
 
@@ -65,20 +72,35 @@ export const generateQuotationPDF = async (
     subject: 'Teklif',
   })
 
-  // Load custom Roboto font for Turkish Lira symbol support
+  // Try to load custom Roboto font for special characters (₺, €)
+  let fontLoaded = false
   try {
+    console.log('Attempting to load Roboto font...')
     const response = await fetch('/fonts/Roboto-Regular.ttf')
+
+    if (!response.ok) {
+      throw new Error(`Font fetch failed: ${response.status}`)
+    }
+
     const arrayBuffer = await response.arrayBuffer()
-    const base64 = btoa(
-      String.fromCharCode(...new Uint8Array(arrayBuffer))
-    )
+    console.log('Font loaded, size:', arrayBuffer.byteLength)
+
+    // Convert to base64
+    const bytes = new Uint8Array(arrayBuffer)
+    let binary = ''
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i])
+    }
+    const base64 = btoa(binary)
 
     doc.addFileToVFS('Roboto-Regular.ttf', base64)
     doc.addFont('Roboto-Regular.ttf', 'Roboto', 'normal')
     doc.setFont('Roboto', 'normal')
+    fontLoaded = true
+    console.log('Roboto font loaded successfully!')
   } catch (error) {
-    console.error('Failed to load custom font:', error)
-    // Fallback to default font
+    console.error('Failed to load custom font, using default:', error)
+    // Fallback to default font (no setFont call)
   }
 
   // Başlık
@@ -148,9 +170,9 @@ export const generateQuotationPDF = async (
     doc.text(productType, 60, yPos)
 
     doc.text(`${quantity} ${sanitizeText(item.product.unit)}`, 100, yPos)
-    doc.text(`${unitPrice.toFixed(2)} ${getCurrencySymbol(item.product.currency)}`, 120, yPos)
+    doc.text(`${unitPrice.toFixed(2)} ${getCurrencySymbol(item.product.currency, fontLoaded)}`, 120, yPos)
     doc.text(`%${discount}`, 150, yPos)
-    doc.text(`${total.toFixed(2)} ${getCurrencySymbol(item.product.currency)}`, 170, yPos)
+    doc.text(`${total.toFixed(2)} ${getCurrencySymbol(item.product.currency, fontLoaded)}`, 170, yPos)
 
     yPos += 6
   })
@@ -185,17 +207,17 @@ export const generateQuotationPDF = async (
   Object.entries(totalsByCurrency).forEach(([currency, amounts]) => {
     yPos += 6
     doc.text(`Ara Toplam (${currency}): `, 140, yPos)
-    doc.text(`${amounts.total.toFixed(2)} ${getCurrencySymbol(currency)}`, 175, yPos)
+    doc.text(`${amounts.total.toFixed(2)} ${getCurrencySymbol(currency, fontLoaded)}`, 175, yPos)
 
     if (amounts.discount > 0) {
       yPos += 6
       doc.text(`Iskonto (${currency}): `, 140, yPos)
-      doc.text(`-${amounts.discount.toFixed(2)} ${getCurrencySymbol(currency)}`, 175, yPos)
+      doc.text(`-${amounts.discount.toFixed(2)} ${getCurrencySymbol(currency, fontLoaded)}`, 175, yPos)
     }
 
     yPos += 6
     doc.text(`GENEL TOPLAM (${currency}): `, 140, yPos)
-    doc.text(`${amounts.final.toFixed(2)} ${getCurrencySymbol(currency)}`, 175, yPos)
+    doc.text(`${amounts.final.toFixed(2)} ${getCurrencySymbol(currency, fontLoaded)}`, 175, yPos)
     yPos += 8
   })
 
