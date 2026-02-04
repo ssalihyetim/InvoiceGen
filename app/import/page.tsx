@@ -46,38 +46,103 @@ export default function ImportPage() {
   const [loadingHistory, setLoadingHistory] = useState(false)
 
   const parseProductRow = (row: any): ProductRow => {
-    const diameter = row['Çap'] || row['diameter'] || row['Cap']
+    // Çap/Diameter - tüm olası sütun adları
+    const diameter = row['Çap'] || row['ÇAP'] || row['diameter'] || row['Cap'] || row['Diameter']
 
-    // Enhanced price parsing for Turkish format (1.500,50)
+    // Fiyat parsing - TÜM olası sütun adları + güçlendirilmiş format desteği
     let basePrice = 0
     const priceFields = [
-      'Birim Fiyat', 'base_price', 'Fiyat', 'FIYAT', 'Birim Fiyati',
+      'FİYAT', 'Fiyat', 'FIYAT',  // Excel'deki gerçek sütun adı
+      'Birim Fiyat', 'base_price', 'Birim Fiyati',
       'Unit Price', 'Price', 'BirimFiyat', 'BIRIM_FIYAT'
     ]
 
     for (const field of priceFields) {
       if (row[field] !== undefined && row[field] !== null && row[field] !== '') {
-        let priceStr = String(row[field]).trim()
-        // Turkish format: Remove thousands separator (.), convert comma to dot
-        priceStr = priceStr.replace(/\./g, '').replace(',', '.')
-        basePrice = parseFloat(priceStr) || 0
-        if (basePrice > 0) break
+        const rawValue = row[field]
+
+        // Eğer zaten number ise direkt kullan (Excel'den number olarak gelirse)
+        if (typeof rawValue === 'number') {
+          basePrice = rawValue
+          break
+        }
+
+        // String ise parse et (Türkçe format desteği: 1.500,50)
+        let priceStr = String(rawValue).trim()
+
+        // Boş string kontrolü
+        if (priceStr === '') continue
+
+        // Para birimi sembollerini temizle (₺, TL, $, €, EUR, USD)
+        priceStr = priceStr.replace(/[₺$€]/g, '').replace(/\s*(TL|EUR|USD)\s*/gi, '').trim()
+
+        // Türkçe format: binlik ayraç (.) ve ondalık (,) → İngilizce format
+        // Örnek: "1.500,50" → "1500.50"
+        if (priceStr.includes(',') && priceStr.includes('.')) {
+          // Hem nokta hem virgül varsa: 1.500,50 formatı
+          priceStr = priceStr.replace(/\./g, '').replace(',', '.')
+        } else if (priceStr.includes(',')) {
+          // Sadece virgül varsa: 500,50 formatı
+          priceStr = priceStr.replace(',', '.')
+        }
+        // Sadece nokta varsa zaten doğru format (1500.50)
+
+        const parsed = parseFloat(priceStr)
+        if (!isNaN(parsed) && parsed > 0) {
+          basePrice = parsed
+          break
+        }
       }
     }
 
-    // Normalize currency: TL → TRY
-    let currency = String(row['Para Birimi'] || row['currency'] || row['Para Birim'] || 'TRY').toUpperCase()
-    if (currency === 'TL') currency = 'TRY'
-    if (!['TRY', 'USD', 'EUR'].includes(currency)) currency = 'TRY'
+    // Para Birimi - TÜM olası sütun adları
+    // NOT: Excel'de para birimi sütunu yoksa varsayılan EUR kullanılıyor
+    let currency = 'EUR'  // Varsayılan EUR (TRY yerine)
+    const currencyFields = [
+      'Para Birimi', 'PARA BİRİMİ', 'Para Birim', 'ParaBirimi',
+      'currency', 'Currency', 'CURRENCY', 'Birim', 'BIRIM'
+    ]
+
+    for (const field of currencyFields) {
+      if (row[field] !== undefined && row[field] !== null && row[field] !== '') {
+        const rawCurrency = String(row[field]).toUpperCase().trim()
+
+        // TL → TRY normalizasyonu
+        if (rawCurrency === 'TL' || rawCurrency === '₺') {
+          currency = 'TRY'
+          break
+        }
+
+        // Geçerli para birimleri
+        if (['TRY', 'USD', 'EUR', 'DOLLAR', 'EURO'].includes(rawCurrency)) {
+          if (rawCurrency === 'DOLLAR') currency = 'USD'
+          else if (rawCurrency === 'EURO') currency = 'EUR'
+          else currency = rawCurrency
+          break
+        }
+      }
+    }
+
+    // Ürün Tipi - TÜM olası sütun adları (ADI, __EMPTY, ÜRÜN ADI)
+    const productType =
+      row['ADI'] || row['ÜRÜN ADI'] || row['__EMPTY'] ||  // Excel'deki gerçek sütunlar
+      row['Ürün Tipi'] || row['product_type'] || row['Urun Tipi'] ||
+      row['ÜRÜN TİPİ'] || row['URUN TIPI'] || row['Description'] || ''
+
+    // Ürün Kodu - TÜM olası sütun adları (KOD, KOD )
+    const productCode =
+      String(row['KOD'] || row['KOD '] || row['Kod'] ||  // Excel'deki gerçek sütunlar (KOD boşluklu olabilir!)
+      row['Ürün Kodu'] || row['product_code'] || row['Urun Kodu'] ||
+      row['ÜRÜN KODU'] || row['URUN KODU'] || '').trim()
 
     return {
-      product_type: String(row['Ürün Tipi'] || row['product_type'] || row['Urun Tipi'] || row['ÜRÜN TİPİ'] || row['URUN TIPI'] || ''),
+      product_type: String(productType),
       diameter: diameter ? String(diameter) : null,
-      product_code: String(row['Ürün Kodu'] || row['product_code'] || row['Urun Kodu'] || row['ÜRÜN KODU'] || row['URUN KODU'] || row['Kod'] || row['KOD'] || ''),
+      product_code: productCode,
       base_price: basePrice,
       currency: currency,
       unit: String(row['Birim'] || row['unit'] || row['BIRIM'] || 'adet'),
-      description: String(row['Açıklama'] || row['description'] || row['AÇIKLAMA'] || ''),
+      description: String(row['Açıklama'] || row['description'] || row['AÇIKLAMA'] || row['Description'] || ''),
     }
   }
 
@@ -98,6 +163,27 @@ export default function ImportPage() {
       }
     } finally {
       setLoadingHistory(false)
+    }
+  }
+
+  const handleDeleteHistory = async (historyId: string, fileName: string) => {
+    if (!confirm(`"${fileName}" import kaydı SİLİNECEK! Emin misiniz?\n\nBu işlem geri alınamaz.`)) {
+      return
+    }
+
+    try {
+      const { error } = await supabase
+        .from('import_history')
+        .delete()
+        .eq('id', historyId)
+
+      if (error) throw error
+
+      alert('Import kaydı başarıyla silindi')
+      loadImportHistory() // Reload history
+    } catch (error) {
+      console.error('Delete history error:', error)
+      alert('Import kaydı silinirken hata oluştu: ' + (error instanceof Error ? error.message : 'Bilinmeyen hata'))
     }
   }
 
@@ -370,17 +456,26 @@ export default function ImportPage() {
                       <td className="p-3 text-gray-600">
                         {formatDate(history.created_at)}
                       </td>
-                      <td className="p-3 text-center">
-                        {history.failed_imports > 0 && history.error_log && (
+                      <td className="p-3">
+                        <div className="flex gap-2 justify-center">
+                          {history.failed_imports > 0 && history.error_log && (
+                            <button
+                              onClick={() => {
+                                alert(JSON.stringify(history.error_log, null, 2))
+                              }}
+                              className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200"
+                            >
+                              Hata Logları
+                            </button>
+                          )}
                           <button
-                            onClick={() => {
-                              alert(JSON.stringify(history.error_log, null, 2))
-                            }}
-                            className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200"
+                            onClick={() => handleDeleteHistory(history.id, history.file_name)}
+                            className="px-2 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-700"
+                            title="Geçmişten Sil"
                           >
-                            Hata Logları
+                            🗑️ Sil
                           </button>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   ))}

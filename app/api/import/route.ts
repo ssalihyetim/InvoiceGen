@@ -50,9 +50,9 @@ export async function POST(request: NextRequest) {
         }
 
         // Normalize currency: TL → TRY
-        let currency = (product.currency || 'TRY').toUpperCase()
-        if (currency === 'TL') currency = 'TRY'
-        if (!['TRY', 'USD', 'EUR'].includes(currency)) currency = 'TRY'
+        let currency = (product.currency || 'EUR').toUpperCase()  // Varsayılan EUR
+        if (currency === 'TL' || currency === '₺') currency = 'TRY'
+        if (!['TRY', 'USD', 'EUR'].includes(currency)) currency = 'EUR'  // Geçersiz ise EUR
 
         const productData = {
           product_type: product.product_type || 'Tanımsız Ürün',  // Boşsa varsayılan değer
