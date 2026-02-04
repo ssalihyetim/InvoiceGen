@@ -24,11 +24,32 @@ type QuotationItem = {
 const getCurrencySymbol = (currency: string): string => {
   switch (currency.toUpperCase()) {  // Make case-insensitive
     case 'TL':
-    case 'TRY': return '₺'
-    case 'USD': return '$'
-    case 'EUR': return '€'
+    case 'TRY': return 'TL'  // Use "TL" instead of ₺ symbol for PDF compatibility
+    case 'USD': return 'USD'
+    case 'EUR': return 'EUR'
     default: return currency
   }
+}
+
+// Sanitize text and convert Turkish characters to ASCII (fixes PDF spacing issues)
+const sanitizeText = (text: string): string => {
+  if (!text) return ''
+  return text
+    .replace(/İ/g, 'I')
+    .replace(/Ş/g, 'S')
+    .replace(/Ğ/g, 'G')
+    .replace(/Ü/g, 'U')
+    .replace(/Ö/g, 'O')
+    .replace(/Ç/g, 'C')
+    .replace(/ı/g, 'i')
+    .replace(/ş/g, 's')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Remove control characters
+    .replace(/\s+/g, ' ') // Normalize spaces
+    .trim()
 }
 
 export const generateQuotationPDF = (
@@ -38,23 +59,21 @@ export const generateQuotationPDF = (
 ) => {
   const doc = new jsPDF()
 
+  // Don't set any font - use jsPDF default
+  // This ensures proper character rendering without spacing issues
+
   // Başlık
   doc.setFontSize(20)
-  doc.setFont('helvetica', 'bold')
-  // ✅ TEKLİF (with İ) and FORMU - Verified correct Unicode characters
-  doc.text('TEKLİF FORMU', 105, 20, { align: 'center' })
+  doc.text('TEKLIF FORMU', 105, 20, { align: 'center' })
 
   // Teklif numarası ve tarih
   doc.setFontSize(10)
-  doc.setFont('helvetica', 'normal')
   const today = new Date().toLocaleDateString('tr-TR')
   doc.text(`Teklif No: ${quotationNumber}`, 20, 35)
   doc.text(`Tarih: ${today}`, 20, 42)
 
   // Firma bilgileri
-  doc.setFont('helvetica', 'bold')
   doc.text('Firma Bilgileri:', 20, 52)
-  doc.setFont('helvetica', 'normal')
   doc.text(`Firma: ${companyInfo.name}`, 20, 59)
   if (companyInfo.email) {
     doc.text(`Email: ${companyInfo.email}`, 20, 66)
@@ -68,29 +87,27 @@ export const generateQuotationPDF = (
 
   // Teklif kalemleri tablosu
   let yPos = 95
-  doc.setFont('helvetica', 'bold')
-  doc.text('ÜRÜNLER', 20, yPos)
+  doc.text('URUNLER', 20, yPos)
   yPos += 7
 
   // Tablo başlıkları
   doc.setFontSize(9)
   doc.text('#', 15, yPos)
-  doc.text('Ürün Kodu', 23, yPos)
-  doc.text('Ürün Tipi', 60, yPos)
+  doc.text('Urun Kodu', 23, yPos)
+  doc.text('Urun Tipi', 60, yPos)
   doc.text('Miktar', 100, yPos)
   doc.text('Birim Fiyat', 120, yPos)
-  // ✅ İskonto (with İ) - Verified correct Unicode character
-  doc.text('İskonto', 150, yPos)
+  doc.text('Iskonto', 150, yPos)
   doc.text('Toplam', 170, yPos)
   doc.line(15, yPos + 2, 195, yPos + 2)
   yPos += 7
 
   // Satır satır ürünler
-  doc.setFont('helvetica', 'normal')
   items.forEach((item, index) => {
     // Sayfa sonu kontrolü
     if (yPos > 270) {
       doc.addPage()
+      doc.setFontSize(9)
       yPos = 20
     }
 
@@ -102,18 +119,19 @@ export const generateQuotationPDF = (
     const total = subtotal - discountAmount
 
     doc.text(`${index + 1}`, 15, yPos)
-    doc.text(item.product.product_code, 23, yPos)
+    doc.text(sanitizeText(item.product.product_code), 23, yPos)
 
-    // Ürün tipi (uzunsa kısalt)
-    const productType = item.product.product_type.length > 20
-      ? item.product.product_type.substring(0, 17) + '...'
-      : item.product.product_type
+    // Ürün tipi (uzunsa kısalt) - sanitize for proper encoding
+    const rawProductType = sanitizeText(item.product.product_type)
+    const productType = rawProductType.length > 20
+      ? rawProductType.substring(0, 17) + '...'
+      : rawProductType
     doc.text(productType, 60, yPos)
 
-    doc.text(`${quantity} ${item.product.unit}`, 100, yPos)
-    doc.text(`${unitPrice.toFixed(2)}${getCurrencySymbol(item.product.currency)}`, 120, yPos)
+    doc.text(`${quantity} ${sanitizeText(item.product.unit)}`, 100, yPos)
+    doc.text(`${unitPrice.toFixed(2)} ${getCurrencySymbol(item.product.currency)}`, 120, yPos)
     doc.text(`%${discount}`, 150, yPos)
-    doc.text(`${total.toFixed(2)}${getCurrencySymbol(item.product.currency)}`, 170, yPos)
+    doc.text(`${total.toFixed(2)} ${getCurrencySymbol(item.product.currency)}`, 170, yPos)
 
     yPos += 6
   })
@@ -143,26 +161,22 @@ export const generateQuotationPDF = (
     totalsByCurrency[currency].final += total
   })
 
-  doc.setFont('helvetica', 'bold')
   doc.text('TOPLAM:', 140, yPos)
-  doc.setFont('helvetica', 'normal')
 
   Object.entries(totalsByCurrency).forEach(([currency, amounts]) => {
     yPos += 6
-    doc.text(`Ara Toplam (${currency}):`, 140, yPos)
-    doc.text(`${amounts.total.toFixed(2)}${getCurrencySymbol(currency)}`, 175, yPos)
+    doc.text(`Ara Toplam (${currency}): `, 140, yPos)
+    doc.text(`${amounts.total.toFixed(2)} ${getCurrencySymbol(currency)}`, 175, yPos)
 
     if (amounts.discount > 0) {
       yPos += 6
-      doc.text(`İskonto (${currency}):`, 140, yPos)
-      doc.text(`-${amounts.discount.toFixed(2)}${getCurrencySymbol(currency)}`, 175, yPos)
+      doc.text(`Iskonto (${currency}): `, 140, yPos)
+      doc.text(`-${amounts.discount.toFixed(2)} ${getCurrencySymbol(currency)}`, 175, yPos)
     }
 
     yPos += 6
-    doc.setFont('helvetica', 'bold')
-    doc.text(`GENEL TOPLAM (${currency}):`, 140, yPos)
-    doc.text(`${amounts.final.toFixed(2)}${getCurrencySymbol(currency)}`, 175, yPos)
-    doc.setFont('helvetica', 'normal')
+    doc.text(`GENEL TOPLAM (${currency}): `, 140, yPos)
+    doc.text(`${amounts.final.toFixed(2)} ${getCurrencySymbol(currency)}`, 175, yPos)
     yPos += 8
   })
 
@@ -173,7 +187,7 @@ export const generateQuotationPDF = (
     doc.setFontSize(8)
     doc.setTextColor(128, 128, 128)
     doc.text(
-      `Oluşturulma Tarihi: ${new Date().toLocaleString('tr-TR')} | Sayfa ${i} / ${pageCount}`,
+      `Olusturulma Tarihi: ${new Date().toLocaleString('tr-TR')} | Sayfa ${i} / ${pageCount}`,
       105,
       290,
       { align: 'center' }
@@ -181,7 +195,7 @@ export const generateQuotationPDF = (
   }
 
   // ✅ Add verification log
-  console.log('PDF Generated with Turkish characters: TEKLİF FORMU, İskonto')
+  console.log('PDF Generated with default jsPDF font (no spacing or Turkish character issues)')
 
   // PDF'i indir
   doc.save(`Teklif_${quotationNumber}_${companyInfo.name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`)
