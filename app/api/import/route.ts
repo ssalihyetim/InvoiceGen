@@ -122,7 +122,7 @@ export async function POST(request: NextRequest) {
 
     // Import geçmişini kaydet
     try {
-      const { error: historyError } = await supabase
+      const { error: historyError } = await (supabase as any)
         .from('import_history')
         .insert({
           file_name: fileName || 'Unknown File',

@@ -50,8 +50,8 @@ export async function GET(request: NextRequest) {
           sampleData: products?.length || 0,
           error: productsError?.message || null,
           firstItem: products?.[0] ? {
-            code: products[0].product_code,
-            type: products[0].product_type?.substring(0, 40)
+            code: (products[0] as any).product_code,
+            type: (products[0] as any).product_type?.substring(0, 40)
           } : null
         },
         companies: {
