@@ -5,7 +5,7 @@
       "maxDuration": 60
     },
     "app/api/process-image/route.ts": {
-      "maxDuration": 30
+      "maxDuration": 60
     }
   }
 }

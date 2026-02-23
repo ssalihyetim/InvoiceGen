@@ -13,7 +13,7 @@ type ImageUploadTabProps = {
     unit: string
     description: string | null
   }[]
-  onProductsExtracted: (requests: { talep: string; miktar: number }[]) => void
+  onProductsExtracted: (requests: { talep: string; miktar: number; birim: string }[]) => void
 }
 
 const resizeImageToBase64 = (dataUrl: string, maxDim: number): Promise<string> => {
@@ -36,7 +36,7 @@ const resizeImageToBase64 = (dataUrl: string, maxDim: number): Promise<string> =
 
 export default function ImageUploadTab({ onProductsExtracted }: ImageUploadTabProps) {
   const [image, setImage] = useState<string | null>(null)
-  const [extractedRequests, setExtractedRequests] = useState<{ talep: string; miktar: number }[]>([])
+  const [extractedRequests, setExtractedRequests] = useState<{ talep: string; miktar: number; birim: string }[]>([])
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -83,7 +83,7 @@ export default function ImageUploadTab({ onProductsExtracted }: ImageUploadTabPr
     setProcessing(true)
     setError(null)
     try {
-      const resized = await resizeImageToBase64(image, 1024)
+      const resized = await resizeImageToBase64(image, 2048)
       const res = await fetch('/api/process-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -106,7 +106,7 @@ export default function ImageUploadTab({ onProductsExtracted }: ImageUploadTabPr
     }
   }
 
-  const updateRequest = (index: number, field: 'talep' | 'miktar', value: string) => {
+  const updateRequest = (index: number, field: 'talep' | 'miktar' | 'birim', value: string) => {
     setExtractedRequests((prev) =>
       prev.map((r, i) =>
         i === index
@@ -114,6 +114,10 @@ export default function ImageUploadTab({ onProductsExtracted }: ImageUploadTabPr
           : r
       )
     )
+  }
+
+  const addRow = () => {
+    setExtractedRequests((prev) => [...prev, { talep: '', miktar: 1, birim: 'adet' }])
   }
 
   const removeRequest = (index: number) => {
@@ -197,6 +201,7 @@ export default function ImageUploadTab({ onProductsExtracted }: ImageUploadTabPr
               <tr>
                 <th className="px-3 py-2 text-left font-medium text-gray-600">Ürün Adı / Kodu</th>
                 <th className="px-3 py-2 text-left font-medium text-gray-600 w-24">Miktar</th>
+                <th className="px-3 py-2 text-left font-medium text-gray-600 w-24">Birim</th>
                 <th className="w-10" />
               </tr>
             </thead>
@@ -220,6 +225,14 @@ export default function ImageUploadTab({ onProductsExtracted }: ImageUploadTabPr
                       className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-400 text-sm"
                     />
                   </td>
+                  <td className="px-2 py-1">
+                    <input
+                      type="text"
+                      value={req.birim}
+                      onChange={(e) => updateRequest(i, 'birim', e.target.value)}
+                      className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-400 text-sm"
+                    />
+                  </td>
                   <td className="px-2 py-1 text-center">
                     <button
                       onClick={() => removeRequest(i)}
@@ -234,6 +247,13 @@ export default function ImageUploadTab({ onProductsExtracted }: ImageUploadTabPr
             </tbody>
           </table>
         </div>
+
+        <button
+          onClick={addRow}
+          className="mt-2 px-4 py-2 text-sm border border-dashed border-gray-400 text-gray-600 rounded-lg hover:border-blue-400 hover:text-blue-600 w-full"
+        >
+          + Satır Ekle
+        </button>
 
         {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 
@@ -272,7 +292,7 @@ export default function ImageUploadTab({ onProductsExtracted }: ImageUploadTabPr
           {processing ? '⏳ Analiz ediliyor...' : '✨ AI ile Analiz Et'}
         </button>
         <p className="text-sm text-gray-500 text-center">
-          GPT-4o Vision ile otomatik ürün ve miktar tespiti. 3-8 saniye sürebilir.
+          GPT-4o Vision ile otomatik ürün ve miktar tespiti. 5-15 saniye sürebilir.
         </p>
       </div>
     </div>

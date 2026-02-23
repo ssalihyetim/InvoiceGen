@@ -59,6 +59,9 @@ export default function NewQuotationPage() {
   const [showBatchModal, setShowBatchModal] = useState(false)
   const [batchPendingMatches, setBatchPendingMatches] = useState<any[]>([])
 
+  // Görsel eşleştirme ilerleme durumu
+  const [processingProgress, setProcessingProgress] = useState<{ current: number; total: number } | null>(null)
+
   // Firmaları yükle
   useEffect(() => {
     loadCompanies()
@@ -295,19 +298,20 @@ export default function NewQuotationPage() {
     }])
   }
 
-  const handleImageProductsExtracted = async (requests: { talep: string, miktar: number }[]) => {
+  const handleImageProductsExtracted = async (requests: { talep: string, miktar: number, birim: string }[]) => {
     console.log('Starting image products extraction for', requests.length, 'requests')
+
+    setProcessingProgress({ current: 0, total: requests.length })
 
     const newItems: QuotationItem[] = []
     const pendingMultiMatches: any[] = []
     let successCount = 0
     let failCount = 0
+    let completedCount = 0
 
-    for (const request of requests) {
-      console.log('Processing request:', request)
-
-      try {
-        const response = await fetch(MATCH_PRODUCT_URL, {
+    const results = await Promise.allSettled(
+      requests.map(request =>
+        fetch(MATCH_PRODUCT_URL, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -315,69 +319,75 @@ export default function NewQuotationPage() {
           },
           body: JSON.stringify({ customerRequest: request.talep })
         })
+          .then(r => r.json())
+          .then(result => {
+            completedCount++
+            setProcessingProgress({ current: completedCount, total: requests.length })
+            return { request, result }
+          })
+      )
+    )
 
-        const result = await response.json()
-        console.log('AI result for', request.talep, ':', result)
+    for (const settled of results) {
+      if (settled.status === 'rejected') {
+        console.error('Image matching error:', settled.reason)
+        failCount++
+        continue
+      }
 
-        if (result.matched && result.matched.length > 0) {
-          // Multi-match kontrolü
-          if (result.isMultiMatch && result.matched.length > 1) {
-            console.log('Multi-match detected for image request:', request.talep)
-            pendingMultiMatches.push({
-              originalRequest: request.talep,
-              quantity: request.miktar,
-              matches: result.matched,
-              selectedIndex: null
-            })
-          } else {
-            // Tek ürün varsa direkt ekle
-            const match = result.matched[0]
-            let product = match.product
-            if (!product && match.product_id) {
-              product = products.find(p => p.id === match.product_id)
-            }
+      const { request, result } = settled.value
 
-            if (product && match.confidence > 0.3) {
-              newItems.push({
-                product,
-                quantity: request.miktar,
-                discount_percentage: 0,
-                ai_matched: true,
-                original_request: request.talep
-              })
-              successCount++
-              console.log('✓ Matched:', product.product_code)
-            } else {
-              failCount++
-              console.log('✗ Low confidence or no product')
-            }
-          }
+      if (result.matched && result.matched.length > 0) {
+        if (result.isMultiMatch && result.matched.length > 1) {
+          pendingMultiMatches.push({
+            originalRequest: request.talep,
+            quantity: request.miktar,
+            matches: result.matched,
+            selectedIndex: null
+          })
         } else {
-          failCount++
-          console.log('✗ No match found')
+          const match = result.matched[0]
+          let product = match.product
+          if (!product && match.product_id) {
+            product = products.find(p => p.id === match.product_id)
+          }
+
+          if (product && match.confidence > 0.3) {
+            newItems.push({
+              product,
+              quantity: request.miktar,
+              discount_percentage: 0,
+              ai_matched: true,
+              original_request: `${request.talep} [${request.birim}]`
+            })
+            successCount++
+          } else {
+            failCount++
+          }
         }
-      } catch (err) {
-        console.error('Image OCR AI matching error:', err)
+      } else {
         failCount++
       }
     }
 
+    setProcessingProgress(null)
     console.log('Extraction complete. Success:', successCount, 'Failed:', failCount)
 
-    // Başarılı eşleşmeleri ekle
     if (newItems.length > 0) {
       setItems(prev => [...prev, ...newItems])
     }
 
-    // Multi-match varsa modal aç
     if (pendingMultiMatches.length > 0) {
-      console.log('Opening batch modal with', pendingMultiMatches.length, 'pending matches from image')
       setBatchPendingMatches(pendingMultiMatches)
       setShowBatchModal(true)
     }
 
-    // Sadece bir kere alert göster
-    return Promise.resolve()
+    const multiMatchCount = pendingMultiMatches.length
+    alert(
+      `Eşleştirme tamamlandı!\n✓ ${successCount} ürün eşleşti\n` +
+      (multiMatchCount > 0 ? `⚠ ${multiMatchCount} belirsiz (seçim gerekiyor)\n` : '') +
+      (failCount > 0 ? `✗ ${failCount} bulunamadı` : '')
+    )
   }
 
   const updateItem = (index: number, field: 'quantity' | 'discount_percentage', value: number) => {
@@ -681,10 +691,17 @@ export default function NewQuotationPage() {
 
         {/* Görsel Yükleme */}
         {activeTab === 'image' && (
-          <ImageUploadTab
-            products={products as any}
-            onProductsExtracted={handleImageProductsExtracted}
-          />
+          <div>
+            <ImageUploadTab
+              products={products as any}
+              onProductsExtracted={handleImageProductsExtracted}
+            />
+            {processingProgress && (
+              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
+                ⏳ Ürünler eşleştiriliyor... {processingProgress.current} / {processingProgress.total}
+              </div>
+            )}
+          </div>
         )}
 
         {/* Manuel Seçim */}

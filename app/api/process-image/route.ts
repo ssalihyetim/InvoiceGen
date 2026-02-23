@@ -21,13 +21,18 @@ export async function POST(request: NextRequest) {
     const openai = new OpenAI({ apiKey })
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      max_tokens: 1000,
+      model: 'gpt-4o',
+      max_tokens: 4000,
       temperature: 0.1,
       messages: [
         {
           role: 'system',
-          content: 'Sen bir Türk endüstriyel ürün sipariş formu analistisin. Görseldeki ürün taleplerini JSON formatında çıkar.',
+          content: `Sen Türk endüstriyel ürün listesi tablolarını analiz eden bir uzmansın.
+Görselde tablo varsa her satırı ayrı kalem olarak çıkar.
+Ürün kodu varsa mutlaka dahil et (açıklama yanında kod da olsun).
+Ürün kodu ve açıklamayı birleştirerek "product" alanına yaz (ör: "PE100 63mm SDR17 HDPE Boru").
+Eksik değerleri tahmin etme, sadece görselde olanı yaz.
+Başlık satırlarını, toplam satırlarını ve boş satırları atla.`,
         },
         {
           role: 'user',
@@ -38,13 +43,16 @@ export async function POST(request: NextRequest) {
             },
             {
               type: 'text',
-              text: `Bu görseldeki ürün taleplerini analiz et. Her kalem için:
-- product: ürün adı veya kodu (string, Türkçe)
+              text: `Tablodaki TÜM ürün satırlarını JSON array olarak çıkar.
+Önce tabloda kaç ürün satırı olduğunu say, sonra hepsini listele.
+Hiçbir satırı atlama — büyük liste olsa bile tümünü yaz.
+Her kalem için:
+- product: ürün kodu + açıklaması birlikte (string, Türkçe/teknik)
 - quantity: miktar (sayı, belirtilmemişse 1)
-- unit: birim (adet/metre/kg/litre/ton/kutu - belirtilmemişse "adet")
+- unit: birim (adet/metre/kg/litre/ton/kutu/rulo — belirtilmemişse "adet")
 
-Sadece JSON array döndür, markdown code block kullanma.
-Örnek: [{"product":"63mm PE Boru","quantity":50,"unit":"metre"}]
+Sadece JSON array döndür, markdown code block veya açıklama ekleme.
+Örnek: [{"product":"PE100 63mm SDR17 HDPE Boru","quantity":100,"unit":"metre"}]
 Ürün yoksa: []`,
             },
           ],
@@ -62,15 +70,29 @@ Sadece JSON array döndür, markdown code block kullanma.
     try {
       parsed = JSON.parse(cleaned)
     } catch {
-      return NextResponse.json(
-        { error: 'GPT yanıtı JSON olarak ayrıştırılamadı.', raw: cleaned },
-        { status: 500 }
-      )
+      // Fallback: extract JSON array from anywhere in the response
+      const match = cleaned.match(/\[[\s\S]*\]/)
+      if (match) {
+        try {
+          parsed = JSON.parse(match[0])
+        } catch {
+          return NextResponse.json(
+            { error: 'GPT yanıtı JSON olarak ayrıştırılamadı.', raw: cleaned },
+            { status: 500 }
+          )
+        }
+      } else {
+        return NextResponse.json(
+          { error: 'GPT yanıtı JSON olarak ayrıştırılamadı.', raw: cleaned },
+          { status: 500 }
+        )
+      }
     }
 
     const requests = parsed.map((item) => ({
       talep: item.product ?? '',
       miktar: typeof item.quantity === 'number' ? item.quantity : 1,
+      birim: item.unit ?? 'adet',
     }))
 
     return NextResponse.json({ requests })

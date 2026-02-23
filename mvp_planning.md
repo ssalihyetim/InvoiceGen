@@ -13,9 +13,18 @@
 - Faz 4: Excel import sistemi
 - Faz 5: AI ürün eşleştirme (ilk versiyon)
 - Faz 7: Teklif oluşturma (3 giriş yöntemi)
-  - ✅ Görsel Yükle iyileştirmesi: Tesseract.js OCR → GPT-4o-mini Vision API
+  - ✅ Görsel Yükle v1: Tesseract.js OCR → GPT-4o-mini Vision API
     - `app/api/process-image/route.ts` endpoint eklendi
     - Client-side image resize (max 1024px) + düzenlenebilir sonuç tablosu
+  - ✅ Görsel Yükle v2: gpt-4o, 2048px çözünürlük, parallel matching, unit sütunu
+    - Model: gpt-4o-mini → gpt-4o (yoğun tablo okuma için)
+    - Çözünürlük: 1024px → 2048px
+    - max_tokens: 1000 → 4000 (80+ satır için)
+    - Paralel eşleştirme: sequential for...of → Promise.allSettled
+    - Birim sütunu eklendi (düzenlenebilir)
+    - "Satır Ekle" butonu eklendi
+    - Vercel timeout: 30s → 60s
+    - Risk: Görsel kalitesi düşükse gpt-4o da başarısız olabilir — kullanıcıya manuel düzenleme imkânı var
 - Faz 8: AI optimizasyonu (10x hız, %99 maliyet düşüşü)
 
 ---
@@ -51,7 +60,7 @@
 **Neden üçüncü?** Test ve deployment bir arada yapılabilir.
 
 İş kalemleri:
-- [x] Vercel deployment konfigürasyonu (`vercel.json` eklendi — import: 60s, process-image: 30s timeout)
+- [x] Vercel deployment konfigürasyonu (`vercel.json` eklendi — import: 60s, process-image: 60s timeout)
 - [ ] Vercel Dashboard'da GitHub bağlantısı kur (`ssalihyetim/InvoiceGen` → main branch)
 - [ ] Environment variables (production Supabase URL/key, OpenAI key) → Vercel Dashboard'a ekle
 - [ ] Custom domain (opsiyonel)
