@@ -620,8 +620,8 @@ export default function ProductsPage() {
                 <td className="p-3">{product.diameter || '-'}</td>
                 <td className="p-3 text-right">
                   <div className="flex items-center justify-end gap-2">
-                    <span className="font-medium">{product.base_price.toFixed(2)}{getCurrencySymbol(product.currency)}</span>
-                    {product.base_price === 0 && (
+                    <span className="font-medium">{(isNaN(product.base_price) || product.base_price == null ? 0 : product.base_price).toFixed(2)}{getCurrencySymbol(product.currency)}</span>
+                    {(product.base_price === 0 || isNaN(product.base_price) || product.base_price == null) && (
                       <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded whitespace-nowrap">
                         ⚠️ Fiyat sorunuz
                       </span>

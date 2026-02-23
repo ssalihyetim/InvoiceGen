@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
           product_type: product.product_type || 'Tanımsız Ürün',  // Boşsa varsayılan değer
           diameter: product.diameter || null,
           product_code: product.product_code,
-          base_price: product.base_price || 0,
+          base_price: (typeof product.base_price === 'number' && isFinite(product.base_price)) ? product.base_price : 0,
           currency: currency,
           unit: product.unit || 'adet',
           description: product.description || null,
