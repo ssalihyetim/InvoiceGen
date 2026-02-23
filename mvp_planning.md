@@ -1,6 +1,6 @@
 # MVP Planlama
 
-**Proje Durumu**: 8/12 faz tamamlandı (%67)
+**Proje Durumu**: 8/12 faz tamamlandı (%67) + Görsel Yükle iyileştirmesi
 **Güncelleme**: 2026-02-23
 
 ---
@@ -13,6 +13,9 @@
 - Faz 4: Excel import sistemi
 - Faz 5: AI ürün eşleştirme (ilk versiyon)
 - Faz 7: Teklif oluşturma (3 giriş yöntemi)
+  - ✅ Görsel Yükle iyileştirmesi: Tesseract.js OCR → GPT-4o-mini Vision API
+    - `app/api/process-image/route.ts` endpoint eklendi
+    - Client-side image resize (max 1024px) + düzenlenebilir sonuç tablosu
 - Faz 8: AI optimizasyonu (10x hız, %99 maliyet düşüşü)
 
 ---
@@ -48,8 +51,9 @@
 **Neden üçüncü?** Test ve deployment bir arada yapılabilir.
 
 İş kalemleri:
-- [ ] Vercel deployment konfigürasyonu
-- [ ] Environment variables (production Supabase URL/key, OpenAI key)
+- [x] Vercel deployment konfigürasyonu (`vercel.json` eklendi — import: 60s, process-image: 30s timeout)
+- [ ] Vercel Dashboard'da GitHub bağlantısı kur (`ssalihyetim/InvoiceGen` → main branch)
+- [ ] Environment variables (production Supabase URL/key, OpenAI key) → Vercel Dashboard'a ekle
 - [ ] Custom domain (opsiyonel)
 - [ ] Supabase production RLS politikalarını doğrula
 
