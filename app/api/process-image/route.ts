@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import OpenAI from 'openai'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 
 export async function POST(request: NextRequest) {
   try {
-    const apiKey = process.env.OPENAI_API_KEY
-    if (!apiKey || apiKey.startsWith('your_') || apiKey === 'placeholder') {
+    const apiKey = process.env.GOOGLE_API_KEY
+    if (!apiKey) {
       return NextResponse.json(
-        { error: 'OpenAI API key yapılandırılmamış.' },
+        { error: 'Google API key yapılandırılmamış.' },
         { status: 500 }
       )
     }
@@ -18,49 +18,53 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Görsel verisi gerekli.' }, { status: 400 })
     }
 
-    const openai = new OpenAI({ apiKey })
+    // Base64 data URL'den saf base64 ve mime type ayır
+    const matches = image.match(/^data:(.+);base64,(.+)$/)
+    if (!matches) {
+      return NextResponse.json({ error: 'Geçersiz görsel formatı.' }, { status: 400 })
+    }
+    const mimeType = matches[1] as 'image/jpeg' | 'image/png' | 'image/webp'
+    const base64Data = matches[2]
 
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      max_tokens: 4000,
-      temperature: 0.1,
-      messages: [
-        {
-          role: 'system',
-          content: `Sen Türk endüstriyel ürün listesi tablolarını analiz eden bir uzmansın.
-Görselde tablo varsa her satırı ayrı kalem olarak çıkar.
-Ürün kodu varsa mutlaka dahil et (açıklama yanında kod da olsun).
-Ürün kodu ve açıklamayı birleştirerek "product" alanına yaz (ör: "PE100 63mm SDR17 HDPE Boru").
-Eksik değerleri tahmin etme, sadece görselde olanı yaz.
-Başlık satırlarını, toplam satırlarını ve boş satırları atla.`,
-        },
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image_url',
-              image_url: { url: image },
-            },
-            {
-              type: 'text',
-              text: `Tablodaki TÜM ürün satırlarını JSON array olarak çıkar.
+    const genAI = new GoogleGenerativeAI(apiKey)
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-2.0-flash',
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 8192,
+      },
+    })
+
+    const prompt = `Sen Türk endüstriyel ürün listesi tablolarını analiz eden bir uzmansın.
+
+Tablodaki TÜM ürün satırlarını JSON array olarak çıkar.
 Önce tabloda kaç ürün satırı olduğunu say, sonra hepsini listele.
 Hiçbir satırı atlama — büyük liste olsa bile tümünü yaz.
+Başlık satırlarını, toplam satırlarını ve boş satırları atla.
+
+Ürün kodu varsa mutlaka dahil et (açıklama yanında kod da olsun).
+Ürün kodu ve açıklamayı birleştirerek "product" alanına yaz.
+
 Her kalem için:
 - product: ürün kodu + açıklaması birlikte (string, Türkçe/teknik)
 - quantity: miktar (sayı, belirtilmemişse 1)
 - unit: birim (adet/metre/kg/litre/ton/kutu/rulo — belirtilmemişse "adet")
 
-Sadece JSON array döndür, markdown code block veya açıklama ekleme.
+Sadece JSON array döndür, başka hiçbir şey yazma.
 Örnek: [{"product":"PE100 63mm SDR17 HDPE Boru","quantity":100,"unit":"metre"}]
-Ürün yoksa: []`,
-            },
-          ],
-        },
-      ],
-    })
+Ürün yoksa: []`
 
-    const content = response.choices[0]?.message?.content ?? '[]'
+    const result = await model.generateContent([
+      { text: prompt },
+      {
+        inlineData: {
+          mimeType,
+          data: base64Data,
+        },
+      },
+    ])
+
+    const content = result.response.text()
     const cleaned = content
       .replace(/```json\n?/g, '')
       .replace(/```\n?/g, '')
@@ -77,13 +81,13 @@ Sadece JSON array döndür, markdown code block veya açıklama ekleme.
           parsed = JSON.parse(match[0])
         } catch {
           return NextResponse.json(
-            { error: 'GPT yanıtı JSON olarak ayrıştırılamadı.', raw: cleaned },
+            { error: 'Gemini yanıtı JSON olarak ayrıştırılamadı.', raw: cleaned },
             { status: 500 }
           )
         }
       } else {
         return NextResponse.json(
-          { error: 'GPT yanıtı JSON olarak ayrıştırılamadı.', raw: cleaned },
+          { error: 'Gemini yanıtı JSON olarak ayrıştırılamadı.', raw: cleaned },
           { status: 500 }
         )
       }
