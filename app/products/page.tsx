@@ -25,7 +25,7 @@ export default function ProductsPage() {
     diameter: '',
     product_code: '',
     base_price: '',
-    currency: 'TL',
+    currency: 'TRY',
     unit: 'adet',
     description: ''
   })
@@ -196,7 +196,7 @@ export default function ProductsPage() {
       diameter: '',
       product_code: '',
       base_price: '',
-      currency: 'TL',
+      currency: 'TRY',  // Fixed: Changed from 'TL' to 'TRY' for consistency
       unit: 'adet',
       description: ''
     })
@@ -318,10 +318,15 @@ export default function ProductsPage() {
 
   const getCurrencySymbol = (currency: string) => {
     switch (currency) {
-      case 'TL': return '₺'
-      case 'USD': return '$'
-      case 'EUR': return '€'
-      default: return currency
+      case 'TRY':
+      case 'TL':
+        return '₺'
+      case 'USD':
+        return '$'
+      case 'EUR':
+        return '€'
+      default:
+        return currency
     }
   }
 
@@ -415,7 +420,7 @@ export default function ProductsPage() {
                   onChange={(e) => setFormData({...formData, currency: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 >
-                  <option value="TL">TL (₺)</option>
+                  <option value="TRY">TL (₺)</option>
                   <option value="USD">USD ($)</option>
                   <option value="EUR">EUR (€)</option>
                 </select>
@@ -525,7 +530,7 @@ export default function ProductsPage() {
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   >
                     <option value="">-- Değiştirme --</option>
-                    <option value="TL">TL (₺)</option>
+                    <option value="TRY">TL (₺)</option>
                     <option value="USD">USD ($)</option>
                     <option value="EUR">EUR (€)</option>
                   </select>

@@ -31,6 +31,10 @@ type ImportHistory = {
   created_at: string
 }
 
+// Key normalization: handles trailing/leading spaces and case variations
+// (e.g. "base_price " === "base_price", "FİYAT" === "fiyat")
+const normalizeKey = (key: string): string => key.toLocaleLowerCase('tr-TR').trim()
+
 export default function ImportPage() {
   const [file, setFile] = useState<File | null>(null)
   const [sheetNames, setSheetNames] = useState<string[]>([])
@@ -46,8 +50,25 @@ export default function ImportPage() {
   const [loadingHistory, setLoadingHistory] = useState(false)
 
   const parseProductRow = (row: any): ProductRow => {
+    // Normalize all row keys to handle leading/trailing spaces and case inconsistencies
+    // e.g. "base_price " (trailing space) and "BASE_PRICE" both map to "base_price"
+    const nr: Record<string, any> = {}
+    for (const key of Object.keys(row)) {
+      nr[normalizeKey(key)] = row[key]
+    }
+
+    // Get first non-empty value from normalized row by trying multiple field name variants
+    const lookup = (fields: string[]): any => {
+      for (const field of fields) {
+        const v = nr[normalizeKey(field)]
+        if (v !== undefined && v !== null && v !== '') return v
+      }
+      return undefined
+    }
+
     // Çap/Diameter - tüm olası sütun adları
-    const diameter = row['Çap'] || row['ÇAP'] || row['diameter'] || row['Cap'] || row['Diameter']
+    const diameterVal = lookup(['Çap', 'ÇAP', 'diameter', 'Cap', 'Diameter'])
+    const diameter = diameterVal !== undefined ? String(diameterVal) : null
 
     // Fiyat parsing - TÜM olası sütun adları + güçlendirilmiş format desteği
     let basePrice = 0
@@ -58,91 +79,85 @@ export default function ImportPage() {
     ]
 
     for (const field of priceFields) {
-      if (row[field] !== undefined && row[field] !== null && row[field] !== '') {
-        const rawValue = row[field]
+      const rawValue = nr[normalizeKey(field)]
+      if (rawValue === undefined || rawValue === null || rawValue === '') continue
 
-        // Eğer zaten number ise direkt kullan (Excel'den number olarak gelirse)
-        if (typeof rawValue === 'number') {
-          basePrice = rawValue
-          break
-        }
+      // NaN fix: typeof NaN === 'number' is true in JS, so we must check explicitly
+      // XLSX returns NaN for empty/error numeric-formatted cells
+      if (typeof rawValue === 'number' && !isNaN(rawValue) && isFinite(rawValue)) {
+        basePrice = rawValue
+        break
+      }
 
-        // String ise parse et (Türkçe format desteği: 1.500,50)
-        let priceStr = String(rawValue).trim()
+      // String ise parse et (Türkçe format desteği: 1.500,50)
+      let priceStr = String(rawValue).trim()
+      if (!priceStr) continue
 
-        // Boş string kontrolü
-        if (priceStr === '') continue
+      // Para birimi sembollerini temizle (₺, TL, $, €, EUR, USD)
+      priceStr = priceStr.replace(/[₺$€]/g, '').replace(/\s*(TL|EUR|USD)\s*/gi, '').trim()
 
-        // Para birimi sembollerini temizle (₺, TL, $, €, EUR, USD)
-        priceStr = priceStr.replace(/[₺$€]/g, '').replace(/\s*(TL|EUR|USD)\s*/gi, '').trim()
+      // Türkçe format: binlik ayraç (.) ve ondalık (,) → İngilizce format
+      // Örnek: "1.500,50" → "1500.50"
+      if (priceStr.includes(',') && priceStr.includes('.')) {
+        priceStr = priceStr.replace(/\./g, '').replace(',', '.')
+      } else if (priceStr.includes(',')) {
+        priceStr = priceStr.replace(',', '.')
+      }
 
-        // Türkçe format: binlik ayraç (.) ve ondalık (,) → İngilizce format
-        // Örnek: "1.500,50" → "1500.50"
-        if (priceStr.includes(',') && priceStr.includes('.')) {
-          // Hem nokta hem virgül varsa: 1.500,50 formatı
-          priceStr = priceStr.replace(/\./g, '').replace(',', '.')
-        } else if (priceStr.includes(',')) {
-          // Sadece virgül varsa: 500,50 formatı
-          priceStr = priceStr.replace(',', '.')
-        }
-        // Sadece nokta varsa zaten doğru format (1500.50)
-
-        const parsed = parseFloat(priceStr)
-        if (!isNaN(parsed) && parsed > 0) {
-          basePrice = parsed
-          break
-        }
+      const parsed = parseFloat(priceStr)
+      if (!isNaN(parsed) && parsed > 0) {
+        basePrice = parsed
+        break
       }
     }
 
     // Para Birimi - TÜM olası sütun adları
-    // NOT: Excel'de para birimi sütunu yoksa varsayılan EUR kullanılıyor
-    let currency = 'EUR'  // Varsayılan EUR (TRY yerine)
+    let currency = 'EUR'  // Varsayılan EUR
     const currencyFields = [
       'Para Birimi', 'PARA BİRİMİ', 'Para Birim', 'ParaBirimi',
       'currency', 'Currency', 'CURRENCY', 'Birim', 'BIRIM'
     ]
 
     for (const field of currencyFields) {
-      if (row[field] !== undefined && row[field] !== null && row[field] !== '') {
-        const rawCurrency = String(row[field]).toUpperCase().trim()
+      const rawCurrency = nr[normalizeKey(field)]
+      if (rawCurrency === undefined || rawCurrency === null || rawCurrency === '') continue
 
-        // TL → TRY normalizasyonu
-        if (rawCurrency === 'TL' || rawCurrency === '₺') {
-          currency = 'TRY'
-          break
-        }
-
-        // Geçerli para birimleri
-        if (['TRY', 'USD', 'EUR', 'DOLLAR', 'EURO'].includes(rawCurrency)) {
-          if (rawCurrency === 'DOLLAR') currency = 'USD'
-          else if (rawCurrency === 'EURO') currency = 'EUR'
-          else currency = rawCurrency
-          break
-        }
+      const rawCurrencyStr = String(rawCurrency).toUpperCase().trim()
+      if (rawCurrencyStr === 'TL' || rawCurrencyStr === '₺') {
+        currency = 'TRY'
+        break
+      }
+      if (['TRY', 'USD', 'EUR', 'DOLLAR', 'EURO'].includes(rawCurrencyStr)) {
+        if (rawCurrencyStr === 'DOLLAR') currency = 'USD'
+        else if (rawCurrencyStr === 'EURO') currency = 'EUR'
+        else currency = rawCurrencyStr
+        break
       }
     }
 
     // Ürün Tipi - TÜM olası sütun adları (ADI, __EMPTY, ÜRÜN ADI)
-    const productType =
-      row['ADI'] || row['ÜRÜN ADI'] || row['__EMPTY'] ||  // Excel'deki gerçek sütunlar
-      row['Ürün Tipi'] || row['product_type'] || row['Urun Tipi'] ||
-      row['ÜRÜN TİPİ'] || row['URUN TIPI'] || row['Description'] || ''
+    const productType = lookup([
+      'ADI', 'ÜRÜN ADI', '__EMPTY',
+      'Ürün Tipi', 'product_type', 'Urun Tipi',
+      'ÜRÜN TİPİ', 'URUN TIPI', 'Description'
+    ]) ?? ''
 
-    // Ürün Kodu - TÜM olası sütun adları (KOD, KOD )
-    const productCode =
-      String(row['KOD'] || row['KOD '] || row['Kod'] ||  // Excel'deki gerçek sütunlar (KOD boşluklu olabilir!)
-      row['Ürün Kodu'] || row['product_code'] || row['Urun Kodu'] ||
-      row['ÜRÜN KODU'] || row['URUN KODU'] || '').trim()
+    // Ürün Kodu - key normalization trailing-space sorununu otomatik çözer (KOD, "KOD ")
+    const productCodeVal = lookup([
+      'KOD', 'KOD ', 'Kod',
+      'Ürün Kodu', 'product_code', 'Urun Kodu',
+      'ÜRÜN KODU', 'URUN KODU'
+    ])
+    const productCode = productCodeVal !== undefined ? String(productCodeVal).trim() : ''
 
     return {
       product_type: String(productType),
-      diameter: diameter ? String(diameter) : null,
+      diameter,
       product_code: productCode,
       base_price: basePrice,
-      currency: currency,
-      unit: String(row['Birim'] || row['unit'] || row['BIRIM'] || 'adet'),
-      description: String(row['Açıklama'] || row['description'] || row['AÇIKLAMA'] || row['Description'] || ''),
+      currency,
+      unit: String(lookup(['Birim', 'unit', 'BIRIM']) ?? 'adet'),
+      description: String(lookup(['Açıklama', 'description', 'AÇIKLAMA', 'Description']) ?? ''),
     }
   }
 

@@ -198,67 +198,129 @@ async function fullTextSearch(supabase: any, parsed: ParsedRequest): Promise<Mat
   }
 
   // Anahtar kelimelerden tsquery oluştur
-  const tsquery = parsed.keywords.join(' & ')
+  const tsqueryAnd = parsed.keywords.join(' & ')
 
-  if (!tsquery) {
+  if (!tsqueryAnd) {
     console.log('📊 Full-text: No keywords, returning empty')
     return []
   }
 
-  console.log('📊 Full-text: tsvector search with tsquery:', tsquery)
-  const { data, error } = await supabase
+  // 2a. AND araması: tüm kelimelerin eşleşmesi gerekir (yüksek güven)
+  console.log('📊 Full-text: tsvector AND search with tsquery:', tsqueryAnd)
+  const { data: andData, error: andError } = await supabase
     .from('products')
     .select('*')
-    .textSearch('search_vector', tsquery, {
+    .textSearch('search_vector', tsqueryAnd, {
       type: 'plain',
       config: 'turkish'
     })
     .limit(10)
 
-  console.log('📊 Full-text tsvector results:', data?.length || 0, 'products', error ? `ERROR: ${error.message}` : '')
-  if (error || !data || data.length === 0) {
-    return []
-  }
+  console.log('📊 Full-text AND results:', andData?.length || 0, 'products', andError ? `ERROR: ${andError.message}` : '')
 
-  // Skorlama: Sayı eşleşmelerine bonus puan
-  const scored = data.map((product: any) => {
-    let score = 0.5 // Base score
+  if (andData && andData.length > 0) {
+    const scored = andData.map((product: any) => {
+      let score = 0.7 // AND match için yüksek base score
 
-    // Sayıları kontrol et (63-50 gibi)
-    if (parsed.numbers.length > 0) {
-      const productNumbers = (product.search_text || '').match(/\d+/g) || []
-
-      // Her eşleşen sayı için bonus
-      parsed.numbers.forEach(num => {
-        if (productNumbers.includes(num)) {
+      if (parsed.numbers.length > 0) {
+        const productNumbers = (product.search_text || '').match(/\d+/g) || []
+        parsed.numbers.forEach(num => {
+          if (productNumbers.includes(num)) score += 0.1
+        })
+        if (parsed.measurementPattern && product.search_text.includes(parsed.measurementPattern)) {
           score += 0.15
         }
-      })
+      }
 
-      // Ölçü pattern tam eşleşmesi (en yüksek bonus)
-      if (parsed.measurementPattern && product.search_text.includes(parsed.measurementPattern)) {
-        score += 0.3
+      const matchedKeywords = parsed.keywords.filter(kw =>
+        product.search_text.toLowerCase().includes(kw.toLowerCase())
+      )
+      score += (matchedKeywords.length / parsed.keywords.length) * 0.05
+
+      return {
+        product_id: product.id,
+        product,
+        confidence: Math.min(score, 1.0),
+        strategy: 'fulltext' as const,
+        reasoning: `AND full-text: ${matchedKeywords.length} kelime eşleşti`,
+        execution_time: Date.now() - startTime
+      }
+    })
+
+    return scored.sort((a, b) => b.confidence - a.confidence)
+  }
+
+  // 2b. OR fallback: en az bir kelime eşleşmeli (orta güven)
+  const tsqueryOr = parsed.keywords.join(' | ')
+  console.log('📊 Full-text: AND returned nothing, trying OR search:', tsqueryOr)
+  const { data: orData, error: orError } = await supabase
+    .from('products')
+    .select('*')
+    .textSearch('search_vector', tsqueryOr, {
+      type: 'plain',
+      config: 'turkish'
+    })
+    .limit(10)
+
+  console.log('📊 Full-text OR results:', orData?.length || 0, 'products', orError ? `ERROR: ${orError.message}` : '')
+
+  if (orData && orData.length > 0) {
+    const scored = orData.map((product: any) => {
+      const matchedKeywords = parsed.keywords.filter(kw =>
+        product.search_text.toLowerCase().includes(kw.toLowerCase())
+      )
+      const matchRatio = parsed.keywords.length > 0
+        ? matchedKeywords.length / parsed.keywords.length
+        : 0
+      return {
+        product_id: product.id,
+        product,
+        confidence: Math.min(0.5 + matchRatio * 0.2, 0.7), // 0.5–0.7 arası
+        strategy: 'fulltext' as const,
+        reasoning: `OR full-text: ${matchedKeywords.length}/${parsed.keywords.length} kelime eşleşti`,
+        execution_time: Date.now() - startTime
+      }
+    })
+    return scored.sort((a, b) => b.confidence - a.confidence)
+  }
+
+  // 2c. ilike fallback: product_type üzerinde doğrudan metin araması (düşük güven)
+  console.log('📊 Full-text: FTS returned nothing, trying ilike fallback on product_type')
+  const ilikeResults: any[] = []
+  const seenIds = new Set<string>()
+
+  for (const keyword of parsed.keywords) {
+    if (keyword.length < 2) continue
+    const { data: ilikeData } = await supabase
+      .from('products')
+      .select('*')
+      .ilike('product_type', `%${keyword}%`)
+      .limit(10)
+
+    if (ilikeData) {
+      for (const product of ilikeData) {
+        if (!seenIds.has(product.id)) {
+          seenIds.add(product.id)
+          ilikeResults.push(product)
+        }
       }
     }
+  }
 
-    // Anahtar kelime eşleşmesi
-    const matchedKeywords = parsed.keywords.filter(kw =>
-      product.search_text.toLowerCase().includes(kw.toLowerCase())
-    )
-    score += (matchedKeywords.length / parsed.keywords.length) * 0.2
+  console.log('📊 Full-text ilike results:', ilikeResults.length, 'products')
 
-    return {
+  if (ilikeResults.length > 0) {
+    return ilikeResults.map((product: any) => ({
       product_id: product.id,
       product,
-      confidence: Math.min(score, 1.0),
+      confidence: 0.4,
       strategy: 'fulltext' as const,
-      reasoning: `Full-text: ${matchedKeywords.length} kelime, ${parsed.numbers.length} sayı eşleşti`,
+      reasoning: `ilike fallback on product_type`,
       execution_time: Date.now() - startTime
-    }
-  })
+    }))
+  }
 
-  // Confidence'a göre sırala
-  return scored.sort((a, b) => b.confidence - a.confidence)
+  return []
 }
 
 // Strategy 3: AI Fallback (OpenAI - sadece top 10 ürün)
