@@ -2,28 +2,43 @@
 
 import { useState, useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { createWorker } from 'tesseract.js'
-
-type Product = {
-  id: string
-  product_type: string
-  diameter: string
-  product_code: string
-  base_price: number
-  unit: string
-  description: string | null
-}
 
 type ImageUploadTabProps = {
-  products: Product[]
-  onProductsExtracted: (requests: { talep: string, miktar: number }[]) => void
+  products: {
+    id: string
+    product_type: string
+    diameter: string
+    product_code: string
+    base_price: number
+    unit: string
+    description: string | null
+  }[]
+  onProductsExtracted: (requests: { talep: string; miktar: number }[]) => void
 }
 
-export default function ImageUploadTab({ products, onProductsExtracted }: ImageUploadTabProps) {
+const resizeImageToBase64 = (dataUrl: string, maxDim: number): Promise<string> => {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height))
+      const w = Math.round(img.width * scale)
+      const h = Math.round(img.height * scale)
+      const canvas = document.createElement('canvas')
+      canvas.width = w
+      canvas.height = h
+      const ctx = canvas.getContext('2d')!
+      ctx.drawImage(img, 0, 0, w, h)
+      resolve(canvas.toDataURL('image/jpeg', 0.85))
+    }
+    img.src = dataUrl
+  })
+}
+
+export default function ImageUploadTab({ onProductsExtracted }: ImageUploadTabProps) {
   const [image, setImage] = useState<string | null>(null)
-  const [extractedText, setExtractedText] = useState<string>('')
+  const [extractedRequests, setExtractedRequests] = useState<{ talep: string; miktar: number }[]>([])
   const [processing, setProcessing] = useState(false)
-  const [progress, setProgress] = useState(0)
+  const [error, setError] = useState<string | null>(null)
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const file = acceptedFiles[0]
@@ -31,7 +46,8 @@ export default function ImageUploadTab({ products, onProductsExtracted }: ImageU
       const reader = new FileReader()
       reader.onload = () => {
         setImage(reader.result as string)
-        setExtractedText('')
+        setExtractedRequests([])
+        setError(null)
       }
       reader.readAsDataURL(file)
     }
@@ -39,13 +55,11 @@ export default function ImageUploadTab({ products, onProductsExtracted }: ImageU
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: {
-      'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp']
-    },
-    multiple: false
+    accept: { 'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp'] },
+    multiple: false,
   })
 
-  const handlePaste = async (e: React.ClipboardEvent) => {
+  const handlePaste = (e: React.ClipboardEvent) => {
     const items = e.clipboardData.items
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.indexOf('image') !== -1) {
@@ -54,7 +68,8 @@ export default function ImageUploadTab({ products, onProductsExtracted }: ImageU
           const reader = new FileReader()
           reader.onload = () => {
             setImage(reader.result as string)
-            setExtractedText('')
+            setExtractedRequests([])
+            setError(null)
           }
           reader.readAsDataURL(blob)
         }
@@ -63,229 +78,203 @@ export default function ImageUploadTab({ products, onProductsExtracted }: ImageU
     }
   }
 
-  const performOCR = async () => {
+  const processImageWithAI = async () => {
     if (!image) return
-
     setProcessing(true)
-    setProgress(0)
-
+    setError(null)
     try {
-      const worker = await createWorker('tur', 1, {
-        logger: m => {
-          if (m.status === 'recognizing text') {
-            setProgress(Math.round(m.progress * 100))
-          }
-        }
+      const resized = await resizeImageToBase64(image, 1024)
+      const res = await fetch('/api/process-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: resized }),
       })
-
-      const { data: { text } } = await worker.recognize(image)
-      await worker.terminate()
-
-      setExtractedText(text)
-      setProgress(100)
-    } catch (error) {
-      console.error('OCR Error:', error)
-      alert('Görsel okunamadı. Lütfen daha net bir görsel deneyin.')
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error ?? 'Görsel analiz edilemedi.')
+        return
+      }
+      if (!data.requests || data.requests.length === 0) {
+        setError('Görselde ürün talebi bulunamadı. Daha net bir görsel deneyin.')
+        return
+      }
+      setExtractedRequests(data.requests)
+    } catch (err: any) {
+      setError(err.message ?? 'Beklenmeyen hata.')
     } finally {
       setProcessing(false)
     }
   }
 
-  const parseTextToRequests = () => {
-    const lines = extractedText.split('\n').filter(line => line.trim())
-    const requests: { talep: string, miktar: number }[] = []
-
-    for (const line of lines) {
-      let miktar = 1
-      let cleanLine = line
-
-      // Başındaki numaraları kaldır (1., 2), 3-, vb.)
-      cleanLine = cleanLine.replace(/^\d+[\.\)\-\:]\s*/, '')
-
-      // Tüm sayı+birim kombinasyonlarını bul
-      const quantityPatterns = [
-        /(\d+(?:[.,]\d+)?)\s*(adet|ad|adt)/gi,
-        /(\d+(?:[.,]\d+)?)\s*(metre|meter|mt|m)/gi,
-        /(\d+(?:[.,]\d+)?)\s*(kilogram|kg|kilo)/gi,
-        /(\d+(?:[.,]\d+)?)\s*(litre|lt|l)/gi,
-        /(\d+(?:[.,]\d+)?)\s*(ton|tn)/gi,
-      ]
-
-      // İlk bulunan miktarı al
-      for (const pattern of quantityPatterns) {
-        const match = cleanLine.match(pattern)
-        if (match) {
-          // İlk eşleşmedeki sayıyı al
-          const numberMatch = match[0].match(/(\d+(?:[.,]\d+)?)/)
-          if (numberMatch) {
-            miktar = parseFloat(numberMatch[1].replace(',', '.'))
-            break
-          }
-        }
-      }
-
-      // Miktar bilgisini metnin tamamından kaldır (tüm pattern'lar için)
-      let talep = cleanLine
-      quantityPatterns.forEach(pattern => {
-        talep = talep.replace(pattern, '')
-      })
-
-      // Fazla boşlukları temizle
-      talep = talep.replace(/\s+/g, ' ').trim()
-
-      // En az 3 karakter ve sadece miktar değil
-      if (talep.length > 3 && !/^\d+$/.test(talep)) {
-        requests.push({ talep, miktar })
-        console.log('Parsed:', { talep, miktar, original: line })
-      }
-    }
-
-    return requests
+  const updateRequest = (index: number, field: 'talep' | 'miktar', value: string) => {
+    setExtractedRequests((prev) =>
+      prev.map((r, i) =>
+        i === index
+          ? { ...r, [field]: field === 'miktar' ? (parseFloat(value) || 1) : value }
+          : r
+      )
+    )
   }
 
-  const handleAnalyze = async () => {
-    const requests = parseTextToRequests()
+  const removeRequest = (index: number) => {
+    setExtractedRequests((prev) => prev.filter((_, i) => i !== index))
+  }
 
-    console.log('Parsed requests:', requests)
-
-    if (requests.length === 0) {
-      alert('Hiç ürün talebi tespit edilemedi. Metni düzenleyip tekrar deneyin.')
-      return
-    }
-
-    // Kullanıcıya feedback
+  const handleConfirmRequests = async () => {
+    if (extractedRequests.length === 0) return
     setProcessing(true)
-
     try {
-      await onProductsExtracted(requests)
-
-      // Başarılı mesajı
-      alert(`✓ ${requests.length} talep işlendi!\n\nÜrünler tabloya eklendi. Teklif kalemlerine bakın.`)
-
-      // Formu sıfırla
+      await onProductsExtracted(extractedRequests)
       setImage(null)
-      setExtractedText('')
-    } catch (error) {
-      console.error('Analyze error:', error)
-      alert('❌ Analiz sırasında hata oluştu')
+      setExtractedRequests([])
+    } catch (err: any) {
+      setError(err.message ?? 'Eşleştirme sırasında hata oluştu.')
     } finally {
       setProcessing(false)
     }
   }
 
+  // View 1 — no image
+  if (!image) {
+    return (
+      <div>
+        <div
+          {...getRootProps()}
+          className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+            isDragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-400'
+          }`}
+        >
+          <input {...getInputProps()} />
+          <div className="space-y-2">
+            <svg className="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+              <path
+                d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <p className="text-gray-600">
+              {isDragActive ? 'Dosyayı buraya bırakın' : 'Görseli sürükle-bırak veya tıkla'}
+            </p>
+            <p className="text-sm text-gray-400">PNG, JPG, GIF desteklenir</p>
+          </div>
+        </div>
+
+        <div className="mt-4 text-center">
+          <p className="text-sm text-gray-600 mb-2">veya</p>
+          <div
+            onPaste={handlePaste}
+            tabIndex={0}
+            className="border-2 border-dashed border-gray-300 rounded-lg p-4 focus:border-blue-500 focus:outline-none"
+          >
+            <p className="text-gray-600">Ctrl+V ile görseli buraya yapıştır</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // View 3 — extracted requests editable table
+  if (extractedRequests.length > 0) {
+    return (
+      <div>
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="font-semibold">
+            Tespit Edilen Ürünler ({extractedRequests.length} kalem) — Düzenlenebilir
+          </h3>
+          <button
+            onClick={() => { setImage(null); setExtractedRequests([]) }}
+            className="text-sm text-gray-600 hover:text-gray-800"
+          >
+            ← Yeni Görsel
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full border border-gray-200 rounded-lg text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium text-gray-600">Ürün Adı / Kodu</th>
+                <th className="px-3 py-2 text-left font-medium text-gray-600 w-24">Miktar</th>
+                <th className="w-10" />
+              </tr>
+            </thead>
+            <tbody>
+              {extractedRequests.map((req, i) => (
+                <tr key={i} className="border-t border-gray-200">
+                  <td className="px-2 py-1">
+                    <input
+                      type="text"
+                      value={req.talep}
+                      onChange={(e) => updateRequest(i, 'talep', e.target.value)}
+                      className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-400 text-sm"
+                    />
+                  </td>
+                  <td className="px-2 py-1">
+                    <input
+                      type="number"
+                      value={req.miktar}
+                      min={1}
+                      onChange={(e) => updateRequest(i, 'miktar', e.target.value)}
+                      className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-400 text-sm"
+                    />
+                  </td>
+                  <td className="px-2 py-1 text-center">
+                    <button
+                      onClick={() => removeRequest(i)}
+                      className="text-red-500 hover:text-red-700 font-bold"
+                      title="Sil"
+                    >
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+
+        <button
+          onClick={handleConfirmRequests}
+          disabled={processing || extractedRequests.length === 0}
+          className="mt-4 w-full px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 font-medium"
+        >
+          {processing ? '⏳ Eşleştiriliyor...' : `✓ Ürünleri Eşleştir (${extractedRequests.length} kalem)`}
+        </button>
+      </div>
+    )
+  }
+
+  // View 2 — image loaded, not yet analyzed
   return (
     <div>
-      {/* Görsel Yükleme */}
-      {!image && (
-        <div>
-          <div
-            {...getRootProps()}
-            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
-              isDragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-400'
-            }`}
-          >
-            <input {...getInputProps()} />
-            <div className="space-y-2">
-              <svg
-                className="mx-auto h-12 w-12 text-gray-400"
-                stroke="currentColor"
-                fill="none"
-                viewBox="0 0 48 48"
-              >
-                <path
-                  d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <p className="text-gray-600">
-                {isDragActive ? 'Dosyayı buraya bırakın' : 'Görseli sürükle-bırak veya tıkla'}
-              </p>
-              <p className="text-sm text-gray-400">PNG, JPG, GIF desteklenir</p>
-            </div>
-          </div>
+      <div className="relative">
+        <img src={image} alt="Yüklenen görsel" className="max-h-96 mx-auto rounded-lg border" />
+        <button
+          onClick={() => setImage(null)}
+          className="absolute top-2 right-2 bg-red-600 text-white px-3 py-1 rounded-lg hover:bg-red-700"
+        >
+          ✕ Kaldır
+        </button>
+      </div>
 
-          <div className="mt-4 text-center">
-            <p className="text-sm text-gray-600 mb-2">veya</p>
-            <div
-              onPaste={handlePaste}
-              tabIndex={0}
-              className="border-2 border-dashed border-gray-300 rounded-lg p-4 focus:border-blue-500 focus:outline-none"
-            >
-              <p className="text-gray-600">
-                Ctrl+V ile görseli buraya yapıştır
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+      {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
-      {/* Görsel Önizleme */}
-      {image && !extractedText && (
-        <div>
-          <div className="relative">
-            <img src={image} alt="Yüklenen görsel" className="max-h-96 mx-auto rounded-lg border" />
-            <button
-              onClick={() => setImage(null)}
-              className="absolute top-2 right-2 bg-red-600 text-white px-3 py-1 rounded-lg hover:bg-red-700"
-            >
-              ✕ Kaldır
-            </button>
-          </div>
-
-          <div className="mt-4 space-y-2">
-            <button
-              onClick={performOCR}
-              disabled={processing}
-              className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 font-medium"
-            >
-              {processing ? `İşleniyor... %${progress}` : '🔍 OCR ile Metni Çıkar (Ücretsiz)'}
-            </button>
-            <p className="text-sm text-gray-500 text-center">
-              Türkçe karakterler desteklenir. İşlem 5-15 saniye sürebilir.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Çıkarılan Metin */}
-      {extractedText && (
-        <div>
-          <div className="flex justify-between items-center mb-2">
-            <h3 className="font-semibold">Çıkarılan Metin (Düzenlenebilir)</h3>
-            <button
-              onClick={() => {
-                setImage(null)
-                setExtractedText('')
-              }}
-              className="text-sm text-gray-600 hover:text-gray-800"
-            >
-              ← Yeni Görsel
-            </button>
-          </div>
-
-          <textarea
-            value={extractedText}
-            onChange={(e) => setExtractedText(e.target.value)}
-            className="w-full h-64 px-4 py-2 border border-gray-300 rounded-lg font-mono text-sm"
-            placeholder="OCR sonucu buraya yazılacak..."
-          />
-
-          <div className="mt-4 space-y-2">
-            <button
-              onClick={handleAnalyze}
-              disabled={processing}
-              className="w-full px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 font-medium"
-            >
-              {processing ? '⏳ Analiz ediliyor...' : '✓ Analiz Et ve Ürünleri Eşleştir'}
-            </button>
-            <p className="text-xs text-gray-500">
-              Her satır bir teklif talebi olarak işlenecek. AI otomatik ürün eşleştirecek.
-            </p>
-          </div>
-        </div>
-      )}
+      <div className="mt-4 space-y-2">
+        <button
+          onClick={processImageWithAI}
+          disabled={processing}
+          className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 font-medium"
+        >
+          {processing ? '⏳ Analiz ediliyor...' : '✨ AI ile Analiz Et'}
+        </button>
+        <p className="text-sm text-gray-500 text-center">
+          GPT-4o Vision ile otomatik ürün ve miktar tespiti. 3-8 saniye sürebilir.
+        </p>
+      </div>
     </div>
   )
 }
