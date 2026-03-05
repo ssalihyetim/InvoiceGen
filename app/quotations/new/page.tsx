@@ -62,6 +62,9 @@ export default function NewQuotationPage() {
   // Görsel eşleştirme ilerleme durumu
   const [processingProgress, setProcessingProgress] = useState<{ current: number; total: number } | null>(null)
 
+  // Eşleşemeyen OCR satırları
+  const [unmatchedItems, setUnmatchedItems] = useState<string[]>([])
+
   // Firmaları yükle
   useEffect(() => {
     loadCompanies()
@@ -78,12 +81,23 @@ export default function NewQuotationPage() {
   }
 
   const loadProducts = async () => {
-    const { data } = await supabase
-      .from('products')
-      .select('*')
-      .order('product_code')
+    const PAGE = 1000
+    const allProducts: Product[] = []
+    let from = 0
 
-    if (data) setProducts(data)
+    while (true) {
+      const { data } = await supabase
+        .from('products')
+        .select('*')
+        .order('product_code')
+        .range(from, from + PAGE - 1)
+      if (!data || data.length === 0) break
+      allProducts.push(...(data as Product[]))
+      if (data.length < PAGE) break
+      from += PAGE
+    }
+
+    setProducts(allProducts)
   }
 
   const handleAISearch = async () => {
@@ -305,6 +319,7 @@ export default function NewQuotationPage() {
 
     const newItems: QuotationItem[] = []
     const pendingMultiMatches: any[] = []
+    const failedRequests: string[] = []
     let successCount = 0
     let failCount = 0
     let completedCount = 0
@@ -350,6 +365,11 @@ export default function NewQuotationPage() {
           let product = match.product
           if (!product && match.product_id) {
             product = products.find(p => p.id === match.product_id)
+            // Fallback: local state'te yoksa DB'den direkt çek
+            if (!product) {
+              const { data } = await supabase.from('products').select('*').eq('id', match.product_id).single()
+              product = data
+            }
           }
 
           if (product && match.confidence > 0.3) {
@@ -363,10 +383,12 @@ export default function NewQuotationPage() {
             successCount++
           } else {
             failCount++
+            failedRequests.push(request.talep)
           }
         }
       } else {
         failCount++
+        failedRequests.push(request.talep)
       }
     }
 
@@ -375,6 +397,10 @@ export default function NewQuotationPage() {
 
     if (newItems.length > 0) {
       setItems(prev => [...prev, ...newItems])
+    }
+
+    if (failedRequests.length > 0) {
+      setUnmatchedItems(failedRequests)
     }
 
     if (pendingMultiMatches.length > 0) {
@@ -817,27 +843,33 @@ export default function NewQuotationPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b">
-                  <th className="text-left py-2 px-2">Ürün</th>
+                  <th className="text-left py-2 px-2">Ürün İsmi</th>
                   <th className="text-left py-2 px-2">Kod</th>
-                  <th className="text-right py-2 px-2">Birim Fiyat</th>
+                  <th className="text-right py-2 px-2">Birim Fiyatı</th>
                   <th className="text-center py-2 px-2">Miktar</th>
-                  <th className="text-center py-2 px-2">İskonto %</th>
-                  <th className="text-right py-2 px-2">Toplam</th>
+                  <th className="text-center py-2 px-2">İskonto</th>
+                  <th className="text-right py-2 px-2">İskonto Birim Fiyat</th>
+                  <th className="text-right py-2 px-2">Net Tutar</th>
                   <th className="text-center py-2 px-2"></th>
                 </tr>
               </thead>
               <tbody>
-                {items.filter(item => item.product).map((item, index) => (
+                {items.filter(item => item.product).map((item, index) => {
+                  const basePrice = item.product?.base_price || 0
+                  const discountedUnitPrice = basePrice * (1 - item.discount_percentage / 100)
+                  const netTotal = discountedUnitPrice * item.quantity
+                  const curr = item.product?.currency || 'TRY'
+                  return (
                   <tr key={index} className="border-b">
-                    <td className="py-2 px-2">
+                    <td className="py-2 px-2 text-xs leading-tight max-w-[200px]">
                       {item.product?.product_type}{item.product?.diameter ? ` - ${item.product.diameter}` : ''}
                       {item.ai_matched && <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-1 rounded">AI</span>}
                     </td>
                     <td className="py-2 px-2">{item.product?.product_code}</td>
                     <td className="py-2 px-2 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <span>{(item.product?.base_price || 0).toFixed(2)}{getCurrencySymbol(item.product?.currency || 'TL')}</span>
-                        {(item.product?.base_price || 0) === 0 && (
+                        <span>{basePrice.toFixed(2)}{getCurrencySymbol(curr)}</span>
+                        {basePrice === 0 && (
                           <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded whitespace-nowrap">
                             ⚠️ Fiyat sorunuz
                           </span>
@@ -865,8 +897,11 @@ export default function NewQuotationPage() {
                         step="1"
                       />
                     </td>
+                    <td className="py-2 px-2 text-right text-orange-700">
+                      {discountedUnitPrice.toFixed(2)}{getCurrencySymbol(curr)}
+                    </td>
                     <td className="py-2 px-2 text-right font-semibold">
-                      {calculateItemTotal(item).toFixed(2)}{getCurrencySymbol(item.product?.currency || 'TL')}
+                      {netTotal.toFixed(2)}{getCurrencySymbol(curr)}
                     </td>
                     <td className="py-2 px-2 text-center">
                       <button
@@ -877,7 +912,8 @@ export default function NewQuotationPage() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -913,9 +949,9 @@ export default function NewQuotationPage() {
                 {/* Fiyat Bilgileri */}
                 <div className="grid grid-cols-2 gap-3 mb-3 text-sm">
                   <div>
-                    <label className="text-gray-600 block mb-1">Birim Fiyat</label>
+                    <label className="text-gray-600 block mb-1">Birim Fiyatı</label>
                     <div className="font-semibold flex items-center gap-2">
-                      <span>{(item.product?.base_price || 0).toFixed(2)}{getCurrencySymbol(item.product?.currency || 'TL')}</span>
+                      <span>{(item.product?.base_price || 0).toFixed(2)}{getCurrencySymbol(item.product?.currency || 'TRY')}</span>
                       {(item.product?.base_price || 0) === 0 && (
                         <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded whitespace-nowrap">
                           ⚠️ Fiyat sorunuz
@@ -924,10 +960,16 @@ export default function NewQuotationPage() {
                     </div>
                   </div>
                   <div>
-                    <label className="text-gray-600 block mb-1">Toplam</label>
-                    <div className="font-bold text-blue-600">
-                      {calculateItemTotal(item).toFixed(2)}{getCurrencySymbol(item.product?.currency || 'TL')}
+                    <label className="text-gray-600 block mb-1">İskonto Birim Fiyat</label>
+                    <div className="font-semibold text-orange-700">
+                      {((item.product?.base_price || 0) * (1 - item.discount_percentage / 100)).toFixed(2)}{getCurrencySymbol(item.product?.currency || 'TRY')}
                     </div>
+                  </div>
+                </div>
+                <div className="mb-3 text-sm">
+                  <label className="text-gray-600 block mb-1">Net Tutar</label>
+                  <div className="font-bold text-blue-600">
+                    {calculateItemTotal(item).toFixed(2)}{getCurrencySymbol(item.product?.currency || 'TRY')}
                   </div>
                 </div>
 
@@ -959,6 +1001,28 @@ export default function NewQuotationPage() {
               </div>
             ))}
           </div>
+
+          {/* Eşleşemeyen OCR Satırları */}
+          {unmatchedItems.length > 0 && (
+            <div className="mt-4 p-4 bg-orange-50 border border-orange-200 rounded-lg">
+              <div className="flex justify-between items-start mb-2">
+                <h3 className="font-semibold text-orange-800">
+                  ⚠️ {unmatchedItems.length} satır eşleştirilemedi — manuel ekleyebilirsiniz:
+                </h3>
+                <button
+                  onClick={() => setUnmatchedItems([])}
+                  className="text-orange-600 hover:text-orange-800 text-sm"
+                >
+                  ✕ Kapat
+                </button>
+              </div>
+              <ul className="list-disc list-inside space-y-1 text-sm text-orange-700">
+                {unmatchedItems.map((item, i) => (
+                  <li key={i}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Toplamlar - Para Birimi Bazında */}
           <div className="mt-4 border-t pt-4 flex justify-end">

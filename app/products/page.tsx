@@ -44,14 +44,8 @@ export default function ProductsPage() {
   }, [])
 
   const loadProducts = async () => {
-    let query = supabase
-      .from('products')
-      .select('*', { count: 'exact' })
-      .order('product_code')
-      .limit(10000)  // 10,000'e kadar ürün göster
-
+    // Exact match shortcut (only when searching)
     if (search) {
-      // Exact match önceliği - tam ürün kodu araması
       const exactMatch = await supabase
         .from('products')
         .select('*', { count: 'exact' })
@@ -61,21 +55,36 @@ export default function ProductsPage() {
       if (exactMatch.data && exactMatch.data.length > 0) {
         setProducts(exactMatch.data as any)
         setTotalCount(exactMatch.count || 0)
-        console.log(`Exact match bulundu: ${(exactMatch.data[0] as any).product_code}`)
         return
       }
-
-      // Partial search
-      query = query.or(`product_code.ilike.%${search}%,product_type.ilike.%${search}%,diameter.ilike.%${search}%`)
     }
 
-    const { data, count } = await query
+    // Paginate: 1000 rows per page until all loaded
+    const PAGE = 1000
+    const allProducts: Product[] = []
+    let from = 0
 
-    if (data) {
-      setProducts(data)
-      setTotalCount(count || 0)
-      console.log(`Toplam ${count} ürün var, ${data.length} tanesi gösteriliyor`)
+    while (true) {
+      let q = supabase.from('products').select('*').order('product_code').range(from, from + PAGE - 1)
+      if (search) {
+        q = q.or(`product_code.ilike.%${search}%,product_type.ilike.%${search}%,diameter.ilike.%${search}%`)
+      }
+      const { data } = await q
+      if (!data || data.length === 0) break
+      allProducts.push(...(data as Product[]))
+      if (data.length < PAGE) break
+      from += PAGE
     }
+
+    // Get total count
+    let countQuery = supabase.from('products').select('*', { count: 'exact', head: true })
+    if (search) {
+      countQuery = countQuery.or(`product_code.ilike.%${search}%,product_type.ilike.%${search}%,diameter.ilike.%${search}%`)
+    }
+    const { count } = await countQuery
+
+    setProducts(allProducts)
+    setTotalCount(count || allProducts.length)
   }
 
   // Debounced search - 300ms gecikme ile arama yap
@@ -239,46 +248,28 @@ export default function ProductsPage() {
       return
     }
 
-    let successCount = 0
-    let errorCount = 0
+    try {
+      const response = await fetch('/api/bulk-update-products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ids: Array.from(selectedProducts),
+          updates: {
+            currency: bulkEditData.currency || undefined,
+            unit: bulkEditData.unit || undefined,
+            price_multiplier: multiplier,
+          }
+        })
+      })
 
-    for (const productId of selectedProducts) {
-      const product = products.find(p => p.id === productId)
-      if (!product) continue
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Güncelleme başarısız')
 
-      const updates: any = {}
-
-      // Para birimi değiştir
-      if (bulkEditData.currency) {
-        updates.currency = bulkEditData.currency
-      }
-
-      // Birim değiştir
-      if (bulkEditData.unit) {
-        updates.unit = bulkEditData.unit
-      }
-
-      // Fiyat çarpanı uygula (1.0'dan farklıysa)
-      if (multiplier !== 1.0) {
-        updates.base_price = product.base_price * multiplier
-      }
-
-      if (Object.keys(updates).length > 0) {
-        const { error } = await (supabase
-          .from('products') as any)
-          .update({ ...updates })
-          .eq('id', productId)
-
-        if (error) {
-          console.error(`Hata (${product.product_code}):`, error)
-          errorCount++
-        } else {
-          successCount++
-        }
-      }
+      alert(`Toplu güncelleme tamamlandı!\n\nBaşarılı: ${result.success}`)
+    } catch (err: any) {
+      alert(`Güncelleme hatası: ${err.message}`)
     }
 
-    alert(`Toplu güncelleme tamamlandı!\n\nBaşarılı: ${successCount}\nBaşarısız: ${errorCount}`)
     setSelectedProducts(new Set())
     setShowBulkEdit(false)
     setBulkEditData({ currency: '', unit: '', price_multiplier: '1.0' })
@@ -295,25 +286,24 @@ export default function ProductsPage() {
       return
     }
 
-    let successCount = 0
-    let errorCount = 0
+    const ids = Array.from(selectedProducts)
 
-    for (const productId of selectedProducts) {
-      const { error } = await supabase
-        .from('products')
-        .delete()
-        .eq('id', productId)
+    try {
+      const response = await fetch('/api/bulk-delete-products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids })
+      })
 
-      if (error) {
-        errorCount++
-      } else {
-        successCount++
-      }
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Silme başarısız')
+
+      alert(`${result.deleted} ürün başarıyla silindi.${result.errors > 0 ? `\n${result.errors} ürün silinemedi (tekliflerde kullanılan ürünler).` : ''}`)
+      setSelectedProducts(new Set())
+      loadProducts()
+    } catch (err: any) {
+      alert(`Toplu silme başarısız!\n\nHata: ${err.message}`)
     }
-
-    alert(`Toplu silme tamamlandı!\n\nBaşarılı: ${successCount}\nBaşarısız: ${errorCount}`)
-    setSelectedProducts(new Set())
-    loadProducts()
   }
 
   const getCurrencySymbol = (currency: string) => {
@@ -658,7 +648,7 @@ export default function ProductsPage() {
       </div>
 
       <div className="mt-4 text-sm text-gray-600">
-        Toplam {products.length} ürün
+        Toplam {totalCount.toLocaleString('tr-TR')} ürün
       </div>
     </div>
   )

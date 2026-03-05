@@ -42,16 +42,14 @@ Tablodaki TÜM ürün satırlarını JSON array olarak çıkar.
 Hiçbir satırı atlama — büyük liste olsa bile tümünü yaz.
 Başlık satırlarını, toplam satırlarını ve boş satırları atla.
 
-Ürün kodu varsa mutlaka dahil et (açıklama yanında kod da olsun).
-Ürün kodu ve açıklamayı birleştirerek "product" alanına yaz.
-
 Her kalem için:
-- product: ürün kodu + açıklaması birlikte (string, Türkçe/teknik)
+- product_code: tablodaki ürün kodu / SKU / referans kodu (KOD, ÜRÜN KODU, REF, MALZEME NO gibi sütunlardan al). Bulunamazsa "" bırak.
+- product: ürün açıklaması / ismi (string, Türkçe/teknik)
 - quantity: miktar (sayı, belirtilmemişse 1)
 - unit: birim (adet/metre/kg/litre/ton/kutu/rulo — belirtilmemişse "adet")
 
 Sadece JSON array döndür, başka hiçbir şey yazma.
-Örnek: [{"product":"PE100 63mm SDR17 HDPE Boru","quantity":100,"unit":"metre"}]
+Örnek: [{"product_code":"NTG-EF-63","product":"HDPE Elektrofüzyon Ek Parça 63mm","quantity":10,"unit":"adet"}]
 Ürün yoksa: []`
 
     const result = await model.generateContent([
@@ -70,7 +68,7 @@ Sadece JSON array döndür, başka hiçbir şey yazma.
       .replace(/```\n?/g, '')
       .trim()
 
-    let parsed: { product: string; quantity: number; unit: string }[] = []
+    let parsed: { product_code?: string; product: string; quantity: number; unit: string }[] = []
     try {
       parsed = JSON.parse(cleaned)
     } catch {
@@ -94,7 +92,7 @@ Sadece JSON array döndür, başka hiçbir şey yazma.
     }
 
     const requests = parsed.map((item) => ({
-      talep: item.product ?? '',
+      talep: item.product_code?.trim() || item.product || '',
       miktar: typeof item.quantity === 'number' ? item.quantity : 1,
       birim: item.unit ?? 'adet',
     }))

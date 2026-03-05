@@ -1,7 +1,7 @@
 # MVP Planlama
 
-**Proje Durumu**: 8/12 faz tamamlandı (%67) + Görsel Yükle iyileştirmesi
-**Güncelleme**: 2026-02-23
+**Proje Durumu**: 8/12 faz tamamlandı (%67) + Görsel Yükle iyileştirmesi + kritik bugfix sessiyonu
+**Güncelleme**: 2026-03-05
 
 ---
 
@@ -26,6 +26,18 @@
     - Vercel timeout: 30s → 60s
     - Risk: Görsel kalitesi düşükse gpt-4o da başarısız olabilir — kullanıcıya manuel düzenleme imkânı var
 - Faz 8: AI optimizasyonu (10x hız, %99 maliyet düşüşü)
+- Görsel Yükle v3: GPT-4o → Gemini 2.5 Flash Lite (ücretsiz), model adı UI'dan kaldırıldı
+- Bugfix Sessiyonu 1 (2026-03-05):
+  - Excel import: ON CONFLICT hatası düzeltildi (dosya içi duplicate dedup + ignoreDuplicates:true)
+  - Excel import: Vercel timeout azaltıldı (fallback tek-tek döngüsü kaldırıldı)
+  - Excel import: Mevcut ürünler sessizce atlanıyor (hata vermez)
+  - Excel import: Date serial fiyat sorunu düzeltildi (cellDates:true → instanceof Date check)
+  - Ürünler sayfası: Sayfa altı count totalCount kullanıyor (products.length yerine)
+  - Toplu silme: Tek-tek döngü yerine .in() batch delete (daha hızlı ve güvenilir)
+- Bugfix Sessiyonu 2 (2026-03-05):
+  - OCR eşleştirme: product_code ayrı alan olarak çıkarıldı; talep = product_code || açıklama → exact match oranı arttı
+  - 1000 ürün limiti: Supabase PostgREST server-level max_rows cap → sayfalı yükleme (1000'er batch) eklendi (products + quotations/new)
+  - Toplu silme Bad Request: 1000+ UUID → URL too long → /api/bulk-delete-products endpoint (100'er batch) ile çözüldü
 
 ---
 
