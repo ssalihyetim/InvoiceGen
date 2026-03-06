@@ -84,6 +84,9 @@ export default function ImportPage() {
 
       // NaN fix: typeof NaN === 'number' is true in JS, so we must check explicitly
       // XLSX returns NaN for empty/error numeric-formatted cells
+      // Date fix: Excel date serials (e.g. 46217 = 2026-07-11) appear as large numbers.
+      //   With cellDates:true they come back as JS Date objects — skip those.
+      if (rawValue instanceof Date) continue
       if (typeof rawValue === 'number' && !isNaN(rawValue) && isFinite(rawValue)) {
         basePrice = rawValue
         break
@@ -95,6 +98,12 @@ export default function ImportPage() {
 
       // Para birimi sembollerini temizle (₺, TL, $, €, EUR, USD)
       priceStr = priceStr.replace(/[₺$€]/g, '').replace(/\s*(TL|EUR|USD)\s*/gi, '').trim()
+
+      // Türkçe binlik ayraç: "1.500" veya "12.500" → "1500" / "12500"
+      // (nokta binlik ayraç, ondalık yok — parseFloat("1.500") yanlış 1.5 verir)
+      if (/^\d{1,3}(\.\d{3})+$/.test(priceStr)) {
+        priceStr = priceStr.replace(/\./g, '')
+      }
 
       // Türkçe format: binlik ayraç (.) ve ondalık (,) → İngilizce format
       // Örnek: "1.500,50" → "1500.50"
@@ -255,7 +264,7 @@ export default function ImportPage() {
     } else {
       // Parse Excel
       const data = await selectedFile.arrayBuffer()
-      const workbook = XLSX.read(data)
+      const workbook = XLSX.read(data, { cellDates: true })
 
       // Tüm sheet isimlerini al
       setSheetNames(workbook.SheetNames)
@@ -293,7 +302,7 @@ export default function ImportPage() {
     // İlk seçili sheet'in önizlemesini göster
     if (newSelection.length > 0 && file) {
       const data = await file.arrayBuffer()
-      const workbook = XLSX.read(data)
+      const workbook = XLSX.read(data, { cellDates: true })
       const worksheet = workbook.Sheets[newSelection[0]]
       const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[]
 
@@ -349,7 +358,7 @@ export default function ImportPage() {
       } else {
         // Excel import
         const data = await file.arrayBuffer()
-        const workbook = XLSX.read(data)
+        const workbook = XLSX.read(data, { cellDates: true })
 
         // Tüm seçili sheet'lerden ürünleri topla
         for (let i = 0; i < selectedSheets.length; i++) {

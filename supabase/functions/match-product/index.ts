@@ -54,7 +54,7 @@ function parseCustomerRequest(request: string): ParsedRequest {
   const words = normalized
     .replace(/[^\w\sğüşıöçĞÜŞİÖÇ]/g, ' ')
     .split(/\s+/)
-    .filter(w => w.length > 1 && !stopWords.includes(w.toLowerCase()) && !/^\d+$/.test(w)) // Sayıları hariç tut
+    .filter(w => w.length > 0 && !stopWords.includes(w.toLowerCase())) // Sayıları dahil et (ölçüler kritik!)
 
   const keywords = [...new Set(words)] // Unique keywords
 
@@ -103,7 +103,7 @@ async function exactMatch(supabase: any, parsed: ParsedRequest): Promise<MatchRe
       .from('products')
       .select('*')
       .ilike('search_text', `%${parsed.measurementPattern}%`)
-      .limit(10) // 1'den 10'a çıkarıldı
+      .limit(100)
 
     console.log('🎯 Exact match results:', data?.length || 0, 'products found')
     if (data && data.length > 0) {
@@ -141,7 +141,7 @@ async function fullTextSearch(supabase: any, parsed: ParsedRequest): Promise<Mat
       .from('products')
       .select('*')
       .ilike('search_text', `%${parsed.measurementPattern}%`)
-      .limit(10)
+      .limit(100)
 
     console.log('📊 Full-text pattern results:', data?.length || 0, 'products')
     if (data && data.length > 0) {
@@ -164,7 +164,7 @@ async function fullTextSearch(supabase: any, parsed: ParsedRequest): Promise<Mat
       .from('products')
       .select('*')
       .ilike('search_text', `%${parsed.measurementPattern}%`)
-      .limit(10)
+      .limit(100)
 
     console.log('📊 Full-text pattern+keywords results:', data?.length || 0, 'products')
     if (data && data.length > 0) {
@@ -214,7 +214,7 @@ async function fullTextSearch(supabase: any, parsed: ParsedRequest): Promise<Mat
       type: 'plain',
       config: 'turkish'
     })
-    .limit(10)
+    .limit(100)
 
   console.log('📊 Full-text AND results:', andData?.length || 0, 'products', andError ? `ERROR: ${andError.message}` : '')
 
@@ -260,7 +260,7 @@ async function fullTextSearch(supabase: any, parsed: ParsedRequest): Promise<Mat
       type: 'plain',
       config: 'turkish'
     })
-    .limit(10)
+    .limit(100)
 
   console.log('📊 Full-text OR results:', orData?.length || 0, 'products', orError ? `ERROR: ${orError.message}` : '')
 
@@ -295,7 +295,7 @@ async function fullTextSearch(supabase: any, parsed: ParsedRequest): Promise<Mat
       .from('products')
       .select('*')
       .ilike('product_type', `%${keyword}%`)
-      .limit(10)
+      .limit(30)
 
     if (ilikeData) {
       for (const product of ilikeData) {
@@ -335,8 +335,8 @@ async function aiMatch(
     return null
   }
 
-  // Sadece top 10 ürünü OpenAI'ye gönder (1000 yerine!)
-  const topCandidates = candidates.slice(0, 10)
+  // Top 30 adayı OpenAI'ye gönder
+  const topCandidates = candidates.slice(0, 30)
 
   const prompt = `Müşteri Talebi: "${customerRequest}"
 

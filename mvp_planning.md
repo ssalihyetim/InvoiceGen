@@ -1,7 +1,7 @@
 # MVP Planlama
 
-**Proje Durumu**: 8/12 faz tamamlandı (%67) + Görsel Yükle iyileştirmesi + kritik bugfix sessiyonu
-**Güncelleme**: 2026-03-05
+**Proje Durumu**: 8/12 faz tamamlandı (%67) + Görsel Yükle iyileştirmesi + kritik bugfix sessiyonları + Session 3 iyileştirmeleri
+**Güncelleme**: 2026-03-06
 
 ---
 
@@ -38,6 +38,11 @@
   - OCR eşleştirme: product_code ayrı alan olarak çıkarıldı; talep = product_code || açıklama → exact match oranı arttı
   - 1000 ürün limiti: Supabase PostgREST server-level max_rows cap → sayfalı yükleme (1000'er batch) eklendi (products + quotations/new)
   - Toplu silme Bad Request: 1000+ UUID → URL too long → /api/bulk-delete-products endpoint (100'er batch) ile çözüldü
+- Session 3 (2026-03-06):
+  - Toplu İşlemler "Tümüne Uygula": `applyToAll: true` parametresi eklendi (bulk-update + bulk-delete API). DB'den ID fetch edilerek ID gönderilmeden tüm ürünler tek API çağrısıyla güncelleniyor/siliniyor. Products sayfasına "Tüm [N] Ürüne Uygula" paneli eklendi.
+  - AI Search limitleri artırıldı: Tüm .limit(10) → .limit(100); AI fallback candidates: 10 → 30
+  - Örnek Excel endpoint: `/api/generate-sample-excel` — DB'den 15 rastgele ürün çekip "Müşteri Talebi"+"Miktar" Excel oluşturuyor. Quotations/new sayfasında "Örnek Excel İndir" linki eklendi.
+  - Git push → Vercel production auto-deploy
 
 ---
 

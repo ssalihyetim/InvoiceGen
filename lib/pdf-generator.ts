@@ -138,49 +138,56 @@ export const generateQuotationPDF = async (
   yPos += 7
 
   // Tablo başlıkları
-  doc.setFontSize(9)
-  doc.text('#', 15, yPos)
-  doc.text('Urun Kodu', 23, yPos)
-  doc.text('Urun Tipi', 60, yPos)
-  doc.text('Miktar', 100, yPos)
-  doc.text('Birim Fiyat', 120, yPos)
-  doc.text('Iskonto', 150, yPos)
-  doc.text('Toplam', 170, yPos)
-  doc.line(15, yPos + 2, 195, yPos + 2)
+  doc.setFontSize(8)
+  doc.text('#', 12, yPos)
+  doc.text('Urun Kodu', 18, yPos)
+  doc.text('Urun Adi', 50, yPos)
+  doc.text('Miktar', 95, yPos)
+  doc.text('Birim Fiyat', 110, yPos)
+  doc.text('Iskonto', 133, yPos)
+  doc.text('Isk.Birim Fiyat', 148, yPos)
+  doc.text('Net Tutar', 175, yPos)
+  doc.line(12, yPos + 2, 195, yPos + 2)
   yPos += 7
 
   // Satır satır ürünler
   items.forEach((item, index) => {
-    // Sayfa sonu kontrolü
-    if (yPos > 270) {
-      doc.addPage()
-      doc.setFontSize(9)
-      yPos = 20
-    }
-
     const unitPrice = item.product.base_price
     const quantity = item.quantity
     const discount = item.discount_percentage
-    const subtotal = unitPrice * quantity
-    const discountAmount = subtotal * (discount / 100)
-    const total = subtotal - discountAmount
+    const discountedUnitPrice = unitPrice * (1 - discount / 100)
+    const netTotal = discountedUnitPrice * quantity
+    const currSymbol = getCurrencySymbol(item.product.currency, fontLoaded)
 
-    doc.text(`${index + 1}`, 15, yPos)
-    doc.text(sanitizeText(item.product.product_code), 23, yPos)
+    // Ürün adı — küçük font + tam metin (kısaltmadan)
+    const rawProductName = sanitizeText(
+      item.product.product_type + (item.product.diameter ? ` ${item.product.diameter}` : '')
+    )
+    const nameLines = doc.splitTextToSize(rawProductName, 42) as string[]
+    const rowHeight = Math.max(6, nameLines.length * 4)
 
-    // Ürün tipi (uzunsa kısalt) - sanitize for proper encoding
-    const rawProductType = sanitizeText(item.product.product_type)
-    const productType = rawProductType.length > 20
-      ? rawProductType.substring(0, 17) + '...'
-      : rawProductType
-    doc.text(productType, 60, yPos)
+    // Sayfa sonu kontrolü
+    if (yPos + rowHeight > 270) {
+      doc.addPage()
+      doc.setFontSize(8)
+      yPos = 20
+    }
 
-    doc.text(`${quantity} ${sanitizeText(item.product.unit)}`, 100, yPos)
-    doc.text(`${unitPrice.toFixed(2)} ${getCurrencySymbol(item.product.currency, fontLoaded)}`, 120, yPos)
-    doc.text(`%${discount}`, 150, yPos)
-    doc.text(`${total.toFixed(2)} ${getCurrencySymbol(item.product.currency, fontLoaded)}`, 170, yPos)
+    doc.setFontSize(8)
+    doc.text(`${index + 1}`, 12, yPos)
+    doc.text(sanitizeText(item.product.product_code), 18, yPos)
 
-    yPos += 6
+    doc.setFontSize(7)
+    doc.text(nameLines, 50, yPos)
+    doc.setFontSize(8)
+
+    doc.text(`${quantity} ${sanitizeText(item.product.unit)}`, 95, yPos)
+    doc.text(`${unitPrice.toFixed(2)} ${currSymbol}`, 110, yPos)
+    doc.text(`%${discount}`, 133, yPos)
+    doc.text(`${discountedUnitPrice.toFixed(2)} ${currSymbol}`, 148, yPos)
+    doc.text(`${netTotal.toFixed(2)} ${currSymbol}`, 175, yPos)
+
+    yPos += rowHeight
   })
 
   // Para birimi bazında toplamlar

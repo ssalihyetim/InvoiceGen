@@ -292,7 +292,7 @@ export default function ImageUploadTab({ onProductsExtracted }: ImageUploadTabPr
           {processing ? '⏳ Analiz ediliyor...' : '✨ AI ile Analiz Et'}
         </button>
         <p className="text-sm text-gray-500 text-center">
-          Gemini 2.5 Flash ile otomatik ürün ve miktar tespiti. 5-15 saniye sürebilir.
+          Otomatik ürün ve miktar tespiti. 5-15 saniye sürebilir.
         </p>
       </div>
     </div>

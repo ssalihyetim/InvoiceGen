@@ -18,14 +18,28 @@ export async function POST(request: NextRequest) {
     let failedCount = 0
     const errors: any[] = []
 
+    // Önce batch'e göndermeden önce product_code'a göre deduplicate et
+    // (aynı dosyada veya farklı sheet'lerde aynı kod varsa son occurrence kazanır)
+    const deduplicatedMap = new Map<string, any>()
+    for (const product of products) {
+      if (product.product_code) {
+        deduplicatedMap.set(String(product.product_code).trim(), product)
+      }
+    }
+    const deduplicatedProducts = Array.from(deduplicatedMap.values())
+    const skippedDuplicates = products.length - deduplicatedProducts.length
+    if (skippedDuplicates > 0) {
+      console.log(`  ℹ️ ${skippedDuplicates} adet dosya içi duplicate product_code atlandı`)
+    }
+
     // Batch işleme için 500'lük gruplara böl
     const BATCH_SIZE = 500
-    const totalBatches = Math.ceil(products.length / BATCH_SIZE)
+    const totalBatches = Math.ceil(deduplicatedProducts.length / BATCH_SIZE)
 
     for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
       const start = batchIndex * BATCH_SIZE
-      const end = Math.min(start + BATCH_SIZE, products.length)
-      const batch = products.slice(start, end)
+      const end = Math.min(start + BATCH_SIZE, deduplicatedProducts.length)
+      const batch = deduplicatedProducts.slice(start, end)
 
       console.log(`Batch ${batchIndex + 1}/${totalBatches}: ${start}-${end} (${batch.length} ürün)`)
 
@@ -69,43 +83,26 @@ export async function POST(request: NextRequest) {
 
       if (validProducts.length > 0) {
         try {
-          // Upsert kullanarak batch insert (duplicate durumunda update)
+          // ignoreDuplicates: true → mevcut ürünleri hata vermeden atla (sadece yeni ürünleri ekle)
           const { error } = await supabase
             .from('products')
             .upsert(validProducts as any, {
               onConflict: 'product_code',
-              ignoreDuplicates: false
+              ignoreDuplicates: true
             })
 
           if (error) {
             console.error(`Batch ${batchIndex + 1} hatası:`, error.message)
-            // Batch başarısız olursa tek tek dene
-            for (const product of validProducts) {
-              try {
-                const { error: singleError } = await supabase
-                  .from('products')
-                  .upsert([product] as any, { onConflict: 'product_code' })
-
-                if (singleError) {
-                  failedCount++
-                  errors.push({
-                    product_code: product.product_code,
-                    error: singleError.message
-                  })
-                } else {
-                  successCount++
-                }
-              } catch (err: any) {
-                failedCount++
-                errors.push({
-                  product_code: product.product_code,
-                  error: err.message
-                })
-              }
-            }
+            failedCount += validProducts.length
+            validProducts.forEach(p => {
+              errors.push({
+                product_code: p.product_code,
+                error: error.message
+              })
+            })
           } else {
             successCount += validProducts.length
-            console.log(`  ✓ ${validProducts.length} ürün başarıyla kaydedildi`)
+            console.log(`  ✓ ${validProducts.length} ürün işlendi`)
           }
         } catch (err: any) {
           console.error(`Batch ${batchIndex + 1} kritik hata:`, err.message)

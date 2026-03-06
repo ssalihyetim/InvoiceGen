@@ -33,6 +33,7 @@ export default function ProductsPage() {
   // Bulk edit state
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set())
   const [showBulkEdit, setShowBulkEdit] = useState(false)
+  const [showBulkEditAll, setShowBulkEditAll] = useState(false)
   const [bulkEditData, setBulkEditData] = useState({
     currency: '',
     unit: '',
@@ -306,6 +307,69 @@ export default function ProductsPage() {
     }
   }
 
+  const handleBulkUpdateAll = async () => {
+    const multiplier = parseFloat(bulkEditData.price_multiplier)
+    if (isNaN(multiplier) || multiplier <= 0) {
+      alert('Geçersiz fiyat çarpanı! Lütfen pozitif bir sayı girin.')
+      return
+    }
+
+    if (!confirm(`TÜM ${totalCount.toLocaleString('tr-TR')} ürün güncellenecek. Emin misiniz?`)) {
+      return
+    }
+
+    try {
+      const response = await fetch('/api/bulk-update-products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          applyToAll: true,
+          updates: {
+            currency: bulkEditData.currency || undefined,
+            unit: bulkEditData.unit || undefined,
+            price_multiplier: multiplier,
+          }
+        })
+      })
+
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Güncelleme başarısız')
+
+      alert(`Tüm ürünler güncellendi!\n\nBaşarılı: ${result.success}`)
+    } catch (err: any) {
+      alert(`Güncelleme hatası: ${err.message}`)
+    }
+
+    setShowBulkEditAll(false)
+    setBulkEditData({ currency: '', unit: '', price_multiplier: '1.0' })
+    loadProducts()
+  }
+
+  const handleBulkDeleteAll = async () => {
+    if (!confirm(`TÜM ${totalCount.toLocaleString('tr-TR')} ürün SİLİNECEK!\n\nBU İŞLEM GERİ ALINAMAZ!\n\nEmin misiniz?`)) {
+      return
+    }
+    if (!confirm('Son onay: Tüm ürün veritabanı silinecek. Devam etmek istiyor musunuz?')) {
+      return
+    }
+
+    try {
+      const response = await fetch('/api/bulk-delete-products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ applyToAll: true })
+      })
+
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Silme başarısız')
+
+      alert(`${result.deleted} ürün silindi.${result.errors > 0 ? `\n${result.errors} ürün silinemedi.` : ''}`)
+      loadProducts()
+    } catch (err: any) {
+      alert(`Toplu silme başarısız!\n\nHata: ${err.message}`)
+    }
+  }
+
   const getCurrencySymbol = (currency: string) => {
     switch (currency) {
       case 'TRY':
@@ -459,7 +523,7 @@ export default function ProductsPage() {
       )}
 
       {/* Search */}
-      <div className="bg-white p-4 rounded-lg border border-gray-200 mb-6">
+      <div className="bg-white p-4 rounded-lg border border-gray-200 mb-4">
         <div className="flex gap-2">
           <input
             type="text"
@@ -472,10 +536,85 @@ export default function ProductsPage() {
             onClick={() => setSearch('Tanımsız Ürün')}
             className="px-4 py-2 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 text-sm whitespace-nowrap"
           >
-            🔍 Tip Tanımsız Olanlar
+            Tip Tanımsız Olanlar
           </button>
         </div>
       </div>
+
+      {/* Bulk Apply All */}
+      <div className="bg-gray-50 border border-gray-200 p-3 rounded-lg mb-4 flex items-center gap-3 flex-wrap">
+        <span className="text-sm text-gray-600">
+          Tüm <span className="font-semibold">{totalCount.toLocaleString('tr-TR')}</span> ürüne uygula:
+        </span>
+        <button
+          onClick={() => setShowBulkEditAll(!showBulkEditAll)}
+          className="px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm"
+        >
+          {showBulkEditAll ? 'İptal' : 'Toplu Güncelle (Tümü)'}
+        </button>
+        <button
+          onClick={handleBulkDeleteAll}
+          className="px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+        >
+          Tümünü Sil
+        </button>
+      </div>
+
+      {showBulkEditAll && (
+        <div className="bg-purple-50 border border-purple-200 p-4 rounded-lg mb-4">
+          <h3 className="font-semibold mb-3 text-purple-900">
+            Tüm {totalCount.toLocaleString('tr-TR')} Ürünü Güncelle
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Para Birimi <span className="text-gray-400">(boş = değişmez)</span>
+              </label>
+              <select
+                value={bulkEditData.currency}
+                onChange={(e) => setBulkEditData({...bulkEditData, currency: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              >
+                <option value="">-- Değiştirme --</option>
+                <option value="TRY">TL (₺)</option>
+                <option value="USD">USD ($)</option>
+                <option value="EUR">EUR (€)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Birim <span className="text-gray-400">(boş = değişmez)</span>
+              </label>
+              <input
+                type="text"
+                value={bulkEditData.unit}
+                onChange={(e) => setBulkEditData({...bulkEditData, unit: e.target.value})}
+                placeholder="Örn: adet, metre, kg"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Fiyat Çarpanı <span className="text-gray-400">(1.1 = %10 artış)</span>
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={bulkEditData.price_multiplier}
+                onChange={(e) => setBulkEditData({...bulkEditData, price_multiplier: e.target.value})}
+                placeholder="1.0"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+            </div>
+          </div>
+          <button
+            onClick={handleBulkUpdateAll}
+            className="mt-4 px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+          >
+            Tüm {totalCount.toLocaleString('tr-TR')} Ürünü Güncelle
+          </button>
+        </div>
+      )}
 
       {/* Bulk Edit Toolbar */}
       {selectedProducts.size > 0 && (

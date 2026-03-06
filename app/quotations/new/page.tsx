@@ -708,9 +708,18 @@ export default function NewQuotationPage() {
                 onChange={handleExcelUpload}
                 className="block w-full text-sm text-gray-500 file:mr-4 file:py-3 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100 file:min-h-[44px]"
               />
-              <p className="text-xs text-gray-500 mt-1">
-                Excel: "Müşteri Talebi" ve "Miktar" sütunları
-              </p>
+              <div className="flex items-center justify-between mt-1">
+                <p className="text-xs text-gray-500">
+                  Excel: "Müşteri Talebi" ve "Miktar" sütunları
+                </p>
+                <a
+                  href="/api/generate-sample-excel"
+                  download="ornek-teklif.xlsx"
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  Ornek Excel Indir
+                </a>
+              </div>
             </div>
           </div>
         )}
