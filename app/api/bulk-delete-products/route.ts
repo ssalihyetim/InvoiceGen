@@ -10,28 +10,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'ids array required (or set applyToAll: true)' }, { status: 400 })
     }
 
-    // Resolve ID list
-    let targetIds: string[] = ids || []
     if (applyToAll) {
-      const { data: allProducts } = await supabase.from('products').select('id')
-      targetIds = allProducts?.map((p: any) => p.id) || []
+      await supabase.from('match_analytics').delete().not('id', 'is', null)
+      const { error, count } = await supabase
+        .from('products')
+        .delete({ count: 'exact' })
+        .not('id', 'is', null)
+
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      return NextResponse.json({ deleted: count || 0, errors: 0 })
     }
 
-    const BATCH_SIZE = 100
-    let deleted = 0
-    let errors = 0
+    await supabase.from('match_analytics').delete().in('matched_product_id', ids)
+    const { error, count } = await supabase
+      .from('products')
+      .delete({ count: 'exact' })
+      .in('id', ids)
 
-    for (let i = 0; i < targetIds.length; i += BATCH_SIZE) {
-      const batch = targetIds.slice(i, i + BATCH_SIZE)
-      const { error } = await supabase.from('products').delete().in('id', batch)
-      if (error) {
-        errors += batch.length
-      } else {
-        deleted += batch.length
-      }
-    }
-
-    return NextResponse.json({ deleted, errors })
+    return NextResponse.json({ deleted: count || 0, errors: error ? ids.length : 0 })
   } catch (error: any) {
     console.error('bulk-delete-products error:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })

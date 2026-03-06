@@ -53,13 +53,13 @@ export default function RootLayout({
             fixed lg:static inset-y-0 left-0 z-50
             w-64 bg-white border-r border-gray-200
             transform transition-transform duration-300
-            lg:transform-none
+            lg:transform-none flex flex-col
             ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
           `}>
             <div className="p-6">
               <h1 className="text-xl font-bold text-gray-800">Teklif Sistemi</h1>
             </div>
-            <nav className="px-4 space-y-2">
+            <nav className="px-4 space-y-2 flex-1">
               <a
                 href="/"
                 className="block px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg min-h-[44px] flex items-center"
@@ -96,6 +96,16 @@ export default function RootLayout({
                 Dosya Yükle
               </a>
             </nav>
+            <div className="px-4 pb-4">
+              <form action="/api/auth/logout" method="POST">
+                <button
+                  type="submit"
+                  className="w-full px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg min-h-[44px] flex items-center border border-gray-200"
+                >
+                  Çıkış Yap
+                </button>
+              </form>
+            </div>
           </aside>
 
           {/* Main Content */}
