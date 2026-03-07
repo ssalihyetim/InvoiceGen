@@ -4,25 +4,25 @@ import * as XLSX from 'xlsx'
 
 export async function GET() {
   try {
-    // Fetch up to 15 random products
     const { data: products, error } = await supabase
       .from('products')
-      .select('product_code, product_type, diameter')
+      .select('product_code, product_type, unit')
       .limit(15)
 
     if (error) throw error
 
     const rows = (products || []).map((p, i) => ({
-      'Müşteri Talebi': p.product_code || p.product_type || `Ürün ${i + 1}`,
+      'Ürün Kodu': p.product_code || `URUN-${i + 1}`,
+      'Ürün Adı': p.product_type || '',
       'Miktar': Math.floor(Math.random() * 10) + 1,
+      'Birim': p.unit || 'Adet',
     }))
 
     if (rows.length === 0) {
-      // Fallback sample if DB is empty
       rows.push(
-        { 'Müşteri Talebi': 'NTG EF 63-50', 'Miktar': 2 },
-        { 'Müşteri Talebi': 'Boru 1/2 inç galvanizli', 'Miktar': 10 },
-        { 'Müşteri Talebi': 'Küresel Vana DN25', 'Miktar': 5 },
+        { 'Ürün Kodu': 'NTG EF 63-50', 'Ürün Adı': 'Nipel Galvaniz Erkek-Erkek', 'Miktar': 2, 'Birim': 'Adet' },
+        { 'Ürün Kodu': 'BRU-12-GALV', 'Ürün Adı': 'Boru 1/2 inç galvanizli', 'Miktar': 10, 'Birim': 'Metre' },
+        { 'Ürün Kodu': 'KRV-DN25', 'Ürün Adı': 'Küresel Vana DN25', 'Miktar': 5, 'Birim': 'Adet' },
       )
     }
 
