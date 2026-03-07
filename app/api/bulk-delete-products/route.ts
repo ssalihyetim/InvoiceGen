@@ -11,7 +11,9 @@ export async function POST(request: NextRequest) {
     }
 
     if (applyToAll) {
-      await supabase.from('match_analytics').delete().not('id', 'is', null)
+      const { error: analyticsError } = await supabase.from('match_analytics').delete().not('id', 'is', null)
+      if (analyticsError) console.error('match_analytics delete error:', analyticsError.message)
+
       const { error, count } = await supabase
         .from('products')
         .delete({ count: 'exact' })
@@ -21,7 +23,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ deleted: count || 0, errors: 0 })
     }
 
-    await supabase.from('match_analytics').delete().in('matched_product_id', ids)
+    const { error: analyticsError } = await supabase.from('match_analytics').delete().in('matched_product_id', ids)
+    if (analyticsError) console.error('match_analytics delete error:', analyticsError.message)
+
     const { error, count } = await supabase
       .from('products')
       .delete({ count: 'exact' })

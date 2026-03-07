@@ -1,11 +1,11 @@
 # MVP Planlama
 
-**Proje Durumu**: 8/12 faz tamamlandı (%67) + Görsel Yükle iyileştirmesi + kritik bugfix sessiyonları + Session 3 iyileştirmeleri
-**Güncelleme**: 2026-03-06
+**Proje Durumu**: 9/12 faz tamamlandı (%75) + Görsel Yükle iyileştirmesi + kritik bugfix sessiyonları + Session 3-4 iyileştirmeleri
+**Güncelleme**: 2026-03-07
 
 ---
 
-## Tamamlanan Fazlar (1–8)
+## Tamamlanan Fazlar (1–9)
 
 - Faz 1: Altyapı ve kurulum
 - Faz 2: Veritabanı şeması
@@ -43,6 +43,18 @@
   - AI Search limitleri artırıldı: Tüm .limit(10) → .limit(100); AI fallback candidates: 10 → 30
   - Örnek Excel endpoint: `/api/generate-sample-excel` — DB'den 15 rastgele ürün çekip "Müşteri Talebi"+"Miktar" Excel oluşturuyor. Quotations/new sayfasında "Örnek Excel İndir" linki eklendi.
   - Git push → Vercel production auto-deploy
+- Faz 9: Multi-Tenant Authentication (2026-03-07):
+  - ✅ `app/auth/login/page.tsx` ve `app/auth/signup/page.tsx` oluşturuldu
+  - ✅ `middleware.ts` ile route koruması (`/login`, `/auth/**` hariç tüm sayfalar protected)
+  - ✅ Tüm tablolara `company_id` migration eklendi
+  - ✅ RLS politikaları (products, companies, quotations, quotation_items, import_history)
+  - ✅ Supabase Auth → `user.id` ile `company_id` eşleştirmesi
+  - ✅ Mevcut sayfalar `company_id` filtrelemesi için güncellendi
+  - ✅ Kullanıcı profil/logout UI eklendi
+- Bugfix Sessiyonu 4 (2026-03-07):
+  - Toplu silme FK hatası (root cause): `match_analytics` tablosunda `matched_product_id` FK constraint CASCADE'siz oluşturulmuştu. Production'da match_analytics verisi var; anon key DELETE izni olmayabilir → silently fail → products delete → FK violation.
+  - Çözüm (primer): FK constraint'e `ON DELETE CASCADE` eklendi (Supabase Dashboard SQL ile)
+  - Çözüm (sekonder): `bulk-delete-products/route.ts` — match_analytics delete hatasını yakala ve console.error ile logla (artık silently fail yok)
 
 ---
 
@@ -50,17 +62,7 @@
 
 ### 🔴 Kritik Yol (MVP için zorunlu)
 
-#### Faz 9 – Multi-Tenant Authentication (2–3 gün)
-**Neden önce bu?** Birden fazla firma kullanacaksa veri izolasyonu olmazsa olmaz.
-
-İş kalemleri:
-- [ ] `app/auth/login/page.tsx` ve `app/auth/signup/page.tsx` oluştur
-- [ ] `middleware.ts` ile route koruması (`/login` hariç tüm sayfalar protected)
-- [ ] Tüm tablolara `company_id` migration ekle
-- [ ] RLS politikaları (products, companies, quotations, quotation_items, import_history)
-- [ ] Supabase Auth → `user.id` ile `company_id` eşleştirmesi
-- [ ] Mevcut sayfaları `company_id` filtrelemesi için güncelle
-- [ ] Kullanıcı profil/logout UI
+#### ~~Faz 9 – Multi-Tenant Authentication~~ ✅ Tamamlandı
 
 #### Faz 10 – Export (2 gün)
 **Neden ikinci?** Müşteriye teklif gönderebilmek için PDF/Excel export şart.
@@ -110,9 +112,9 @@ Firma bazlı özel iskonto oranları. MVP sonrası eklenebilir.
 ## Kritik Yol Özeti
 
 ```
-Faz 9 (Auth)
+Faz 9 (Auth) ✅
     ↓
-Faz 10 (Export)
+Faz 10 (Export) ← ŞU AN BURADA
     ↓
 Faz 12 (Deployment)  ←─── Faz 11 (Test) paralel yapılabilir
     ↓
