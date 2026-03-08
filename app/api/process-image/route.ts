@@ -32,13 +32,14 @@ export async function POST(request: NextRequest) {
       generationConfig: {
         temperature: 0.1,
         maxOutputTokens: 8192,
+        // @ts-ignore — Gemini 2.5 thinking config
+        thinkingConfig: { thinkingBudget: 0 },
       },
     })
 
     const prompt = `Sen Türk endüstriyel ürün listesi tablolarını analiz eden bir uzmansın.
 
 Tablodaki TÜM ürün satırlarını JSON array olarak çıkar.
-Önce tabloda kaç ürün satırı olduğunu say, sonra hepsini listele.
 Hiçbir satırı atlama — büyük liste olsa bile tümünü yaz.
 Başlık satırlarını, toplam satırlarını ve boş satırları atla.
 
