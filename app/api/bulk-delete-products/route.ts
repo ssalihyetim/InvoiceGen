@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,10 +11,17 @@ export async function POST(request: NextRequest) {
     }
 
     if (applyToAll) {
-      // Null out FK references first to avoid constraint violation
-      await supabase.from('match_analytics').update({ matched_product_id: null }).not('matched_product_id', 'is', null)
+      // Null out FK references first to avoid constraint violation (uses service role to bypass RLS)
+      const { error: analyticsErr } = await supabaseAdmin
+        .from('match_analytics')
+        .update({ matched_product_id: null })
+        .not('matched_product_id', 'is', null)
 
-      const { error, count } = await supabase
+      if (analyticsErr) {
+        console.error('match_analytics nullify error (applyToAll):', analyticsErr)
+      }
+
+      const { error, count } = await supabaseAdmin
         .from('products')
         .delete({ count: 'exact' })
         .not('id', 'is', null)
@@ -23,10 +30,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ deleted: count || 0, errors: 0 })
     }
 
-    // Null out FK references for these specific products
-    await supabase.from('match_analytics').update({ matched_product_id: null }).in('matched_product_id', ids)
+    // Null out FK references for these specific products (uses service role to bypass RLS)
+    const { error: analyticsErr } = await supabaseAdmin
+      .from('match_analytics')
+      .update({ matched_product_id: null })
+      .in('matched_product_id', ids)
 
-    const { error, count } = await supabase
+    if (analyticsErr) {
+      console.error('match_analytics nullify error:', analyticsErr)
+    }
+
+    const { error, count } = await supabaseAdmin
       .from('products')
       .delete({ count: 'exact' })
       .in('id', ids)
