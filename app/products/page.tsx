@@ -32,6 +32,8 @@ export default function ProductsPage() {
     description: ''
   })
 
+  const [filters, setFilters] = useState({ zeroPriceOnly: false, currency: '' })
+
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set())
   const [showBulkEdit, setShowBulkEdit] = useState(false)
   const [showBulkEditAll, setShowBulkEditAll] = useState(false)
@@ -51,48 +53,63 @@ export default function ProductsPage() {
 
   const loadProducts = async () => {
     setLoading(true)
-    if (search) {
-      const exactMatch = await supabase
-        .from('products')
-        .select('*', { count: 'exact' })
-        .eq('product_code', search)
-        .limit(1)
+    try {
+      if (search) {
+        let exactMatch = supabase
+          .from('products')
+          .select('*', { count: 'exact' })
+          .eq('product_code', search)
+        if (filters.zeroPriceOnly) exactMatch = exactMatch.eq('base_price', 0)
+        if (filters.currency) exactMatch = exactMatch.eq('currency', filters.currency)
+        const exactResult = await exactMatch.limit(1)
 
-      if (exactMatch.data && exactMatch.data.length > 0) {
-        setProducts(exactMatch.data as any)
-        setTotalCount(exactMatch.count || 0)
-        setLoading(false)
-        return
+        if (exactResult.error) throw exactResult.error
+        if (exactResult.data && exactResult.data.length > 0) {
+          setProducts(exactResult.data as any)
+          setTotalCount(exactResult.count || 0)
+          setLoading(false)
+          return
+        }
       }
+
+      const PAGE = 1000
+      const allProducts: Product[] = []
+      let from = 0
+
+      while (true) {
+        let q = supabase.from('products').select('*').order('product_code').range(from, from + PAGE - 1)
+        if (search) q = q.or(`product_code.ilike.%${search}%,product_type.ilike.%${search}%,diameter.ilike.%${search}%`)
+        if (filters.zeroPriceOnly) q = q.eq('base_price', 0)
+        if (filters.currency) q = q.eq('currency', filters.currency)
+        const { data, error } = await q
+        if (error) throw error
+        if (!data || data.length === 0) break
+        allProducts.push(...(data as Product[]))
+        if (data.length < PAGE) break
+        from += PAGE
+      }
+
+      let countQuery = supabase.from('products').select('*', { count: 'exact', head: true })
+      if (search) countQuery = countQuery.or(`product_code.ilike.%${search}%,product_type.ilike.%${search}%,diameter.ilike.%${search}%`)
+      if (filters.zeroPriceOnly) countQuery = countQuery.eq('base_price', 0)
+      if (filters.currency) countQuery = countQuery.eq('currency', filters.currency)
+      const { count, error: countError } = await countQuery
+      if (countError) throw countError
+
+      setProducts(allProducts)
+      setTotalCount(count || allProducts.length)
+    } catch (err: any) {
+      showToast('error', 'Ürünler yüklenirken hata oluştu: ' + (err.message || 'Bağlantı hatası'))
+    } finally {
+      setLoading(false)
     }
-
-    const PAGE = 1000
-    const allProducts: Product[] = []
-    let from = 0
-
-    while (true) {
-      let q = supabase.from('products').select('*').order('product_code').range(from, from + PAGE - 1)
-      if (search) q = q.or(`product_code.ilike.%${search}%,product_type.ilike.%${search}%,diameter.ilike.%${search}%`)
-      const { data } = await q
-      if (!data || data.length === 0) break
-      allProducts.push(...(data as Product[]))
-      if (data.length < PAGE) break
-      from += PAGE
-    }
-
-    let countQuery = supabase.from('products').select('*', { count: 'exact', head: true })
-    if (search) countQuery = countQuery.or(`product_code.ilike.%${search}%,product_type.ilike.%${search}%,diameter.ilike.%${search}%`)
-    const { count } = await countQuery
-
-    setProducts(allProducts)
-    setTotalCount(count || allProducts.length)
-    setLoading(false)
   }
 
   useEffect(() => {
+    setSelectedProducts(new Set())
     const timer = setTimeout(() => loadProducts(), 300)
     return () => clearTimeout(timer)
-  }, [search])
+  }, [search, filters])
 
   const getErrorMessage = (error: any): string => {
     switch (error.code) {
@@ -283,7 +300,14 @@ export default function ProductsPage() {
           <h1 className="text-3xl font-bold text-gray-800">Ürünler</h1>
           <p className="text-sm text-gray-500 mt-1">
             {loading ? 'Yükleniyor...' : (
-              <>Toplam <span className="font-semibold text-gray-700">{totalCount.toLocaleString('tr-TR')}</span> ürün</>
+              <>
+                Toplam <span className="font-semibold text-gray-700">{totalCount.toLocaleString('tr-TR')}</span> ürün
+                {(filters.zeroPriceOnly || filters.currency) && (
+                  <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                    {[filters.zeroPriceOnly, filters.currency].filter(Boolean).length} filtre aktif
+                  </span>
+                )}
+              </>
             )}
           </p>
         </div>
@@ -348,21 +372,37 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {/* Search */}
+      {/* Search & Filters */}
       <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-4">
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <input
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Ürün kodu, tipi veya çapı ile ara..."
-            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="flex-1 min-w-[200px] px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <button onClick={() => setSearch('Tanımsız Ürün')} className="px-4 py-2 bg-orange-50 text-orange-700 border border-orange-200 rounded-lg hover:bg-orange-100 text-sm whitespace-nowrap">
             ⚠ Tipi Tanımsız
           </button>
-          {search && (
-            <button onClick={() => setSearch('')} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 text-sm">
+          <button
+            onClick={() => setFilters(f => ({ ...f, zeroPriceOnly: !f.zeroPriceOnly }))}
+            className={`px-4 py-2 border rounded-lg text-sm whitespace-nowrap transition-colors ${filters.zeroPriceOnly ? 'bg-yellow-500 text-white border-yellow-500' : 'bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100'}`}
+          >
+            🏷 Fiyat Sorunuz
+          </button>
+          <select
+            value={filters.currency}
+            onChange={e => setFilters(f => ({ ...f, currency: e.target.value }))}
+            className={`px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${filters.currency ? 'border-blue-400 bg-blue-50 text-blue-800' : 'border-gray-300 text-gray-600'}`}
+          >
+            <option value="">Para: TÜM</option>
+            <option value="TRY">TL (₺)</option>
+            <option value="USD">USD ($)</option>
+            <option value="EUR">EUR (€)</option>
+          </select>
+          {(search || filters.zeroPriceOnly || filters.currency) && (
+            <button onClick={() => { setSearch(''); setFilters({ zeroPriceOnly: false, currency: '' }) }} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 text-sm whitespace-nowrap">
               Temizle
             </button>
           )}
@@ -482,7 +522,7 @@ export default function ProductsPage() {
                 <tr><td colSpan={8} className="p-8 text-center text-gray-400">Yükleniyor...</td></tr>
               ) : products.length === 0 ? (
                 <tr><td colSpan={8} className="p-8 text-center text-gray-400">
-                  {search ? 'Arama sonucu bulunamadı.' : 'Henüz ürün eklenmemiş.'}
+                  {(search || filters.zeroPriceOnly || filters.currency) ? 'Filtreye uygun ürün bulunamadı.' : 'Henüz ürün eklenmemiş.'}
                 </td></tr>
               ) : products.map(product => (
                 <tr key={product.id} className={`hover:bg-gray-50 transition-colors ${selectedProducts.has(product.id) ? 'bg-blue-50' : ''}`}>

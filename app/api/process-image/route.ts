@@ -92,11 +92,15 @@ Sadece JSON array döndür, başka hiçbir şey yazma.
       }
     }
 
-    const requests = parsed.map((item) => ({
-      talep: item.product_code?.trim() || item.product || '',
-      miktar: typeof item.quantity === 'number' ? item.quantity : 1,
-      birim: item.unit ?? 'adet',
-    }))
+    const requests = parsed.map((item) => {
+      const code = item.product_code?.trim() || ''
+      const desc = item.product?.trim() || ''
+      return {
+        talep: desc ? (code ? `${code} ${desc}` : desc) : code,
+        miktar: typeof item.quantity === 'number' ? item.quantity : 1,
+        birim: item.unit ?? 'adet',
+      }
+    })
 
     return NextResponse.json({ requests })
   } catch (error: any) {

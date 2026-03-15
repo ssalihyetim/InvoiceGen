@@ -59,10 +59,22 @@ const sanitizeText = (text: string): string => {
     .trim()
 }
 
+type TenantSettings = {
+  logo_url?: string
+  terms?: string
+  header_note?: string
+  footer_note?: string
+}
+
 export const generateQuotationPDF = async (
   companyInfo: CompanyInfo,
   items: QuotationItem[],
-  quotationNumber: string
+  quotationNumber: string,
+  options?: {
+    validUntil?: string | null
+    tenantSettings?: TenantSettings
+    tenantName?: string
+  }
 ) => {
   const doc = new jsPDF()
 
@@ -109,31 +121,57 @@ export const generateQuotationPDF = async (
   }
   */
 
+  // Tenant/Company header
+  const tenantName = options?.tenantName
+  const tenantSettings = options?.tenantSettings
+
+  if (tenantName) {
+    doc.setFontSize(12)
+    doc.text(sanitizeText(tenantName), 105, 15, { align: 'center' })
+  }
+  if (tenantSettings?.header_note) {
+    doc.setFontSize(8)
+    doc.setTextColor(100, 100, 100)
+    doc.text(sanitizeText(tenantSettings.header_note), 105, 22, { align: 'center' })
+    doc.setTextColor(0, 0, 0)
+  }
+
   // Başlık
   doc.setFontSize(20)
-  doc.text('TEKLIF FORMU', 105, 20, { align: 'center' })
+  doc.text('TEKLIF FORMU', 105, tenantName ? 32 : 20, { align: 'center' })
 
   // Teklif numarası ve tarih
   doc.setFontSize(10)
   const today = new Date().toLocaleDateString('tr-TR')
-  doc.text(`Teklif No: ${quotationNumber}`, 20, 35)
-  doc.text(`Tarih: ${today}`, 20, 42)
+  const yStart = tenantName ? 45 : 35
+  doc.text(`Teklif No: ${quotationNumber}`, 20, yStart)
+  doc.text(`Tarih: ${today}`, 20, yStart + 7)
+
+  // Validity date
+  if (options?.validUntil) {
+    doc.text(`Gecerlilik: ${new Date(options.validUntil).toLocaleDateString('tr-TR')}`, 120, yStart)
+  }
 
   // Firma bilgileri
-  doc.text('Firma Bilgileri:', 20, 52)
-  doc.text(`Firma: ${companyInfo.name}`, 20, 59)
+  let infoY = yStart + 20
+  doc.text('Firma Bilgileri:', 20, infoY)
+  infoY += 7
+  doc.text(`Firma: ${companyInfo.name}`, 20, infoY)
   if (companyInfo.email) {
-    doc.text(`Email: ${companyInfo.email}`, 20, 66)
+    infoY += 7
+    doc.text(`Email: ${companyInfo.email}`, 20, infoY)
   }
   if (companyInfo.phone) {
-    doc.text(`Telefon: ${companyInfo.phone}`, 20, 73)
+    infoY += 7
+    doc.text(`Telefon: ${companyInfo.phone}`, 20, infoY)
   }
   if (companyInfo.tax_number) {
-    doc.text(`Vergi No: ${companyInfo.tax_number}`, 20, 80)
+    infoY += 7
+    doc.text(`Vergi No: ${companyInfo.tax_number}`, 20, infoY)
   }
 
   // Teklif kalemleri tablosu
-  let yPos = 95
+  let yPos = infoY + 15
   doc.text('URUNLER', 20, yPos)
   yPos += 7
 
@@ -234,18 +272,35 @@ export const generateQuotationPDF = async (
     yPos += 8
   })
 
+  // Terms & conditions (before footer)
+  if (tenantSettings?.terms) {
+    yPos += 10
+    if (yPos > 255) {
+      doc.addPage()
+      yPos = 20
+    }
+    doc.setFontSize(8)
+    doc.setTextColor(80, 80, 80)
+    doc.text('SARTLAR VE KOSULLAR:', 20, yPos)
+    yPos += 5
+    doc.setFontSize(7)
+    const termsLines = doc.splitTextToSize(sanitizeText(tenantSettings.terms), 170) as string[]
+    doc.text(termsLines, 20, yPos)
+    doc.setTextColor(0, 0, 0)
+  }
+
   // Footer
+  const footerText = tenantSettings?.footer_note
+    ? sanitizeText(tenantSettings.footer_note)
+    : ''
   const pageCount = doc.getNumberOfPages()
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i)
     doc.setFontSize(8)
     doc.setTextColor(128, 128, 128)
-    doc.text(
-      `Olusturulma Tarihi: ${new Date().toLocaleString('tr-TR')} | Sayfa ${i} / ${pageCount}`,
-      105,
-      290,
-      { align: 'center' }
-    )
+    const footerLine = `Olusturulma Tarihi: ${new Date().toLocaleString('tr-TR')} | Sayfa ${i} / ${pageCount}`
+      + (footerText ? ` | ${footerText}` : '')
+    doc.text(footerLine, 105, 290, { align: 'center' })
   }
 
   // ✅ Add verification log

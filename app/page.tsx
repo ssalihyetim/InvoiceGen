@@ -23,15 +23,20 @@ function formatCurrency(amount: number, currency: string) {
 }
 
 function statusLabel(status: string) {
-  const map: Record<string, string> = { draft: 'Taslak', sent: 'Gönderildi', accepted: 'Kabul', rejected: 'Red' }
+  const map: Record<string, string> = {
+    draft: 'Taslak', sent: 'Gönderildi', approved: 'Onaylandı',
+    accepted: 'Kabul', rejected: 'Red', expired: 'Süresi Dolmuş'
+  }
   return map[status] || status
 }
 
 const statusStyles: Record<string, string> = {
+  approved: 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200',
   accepted: 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200',
   rejected: 'bg-red-100 text-red-700 ring-1 ring-red-200',
   sent: 'bg-blue-100 text-blue-700 ring-1 ring-blue-200',
   draft: 'bg-amber-100 text-amber-700 ring-1 ring-amber-200',
+  expired: 'bg-gray-100 text-gray-500 ring-1 ring-gray-200',
 }
 
 export default function Home() {
@@ -194,6 +199,77 @@ export default function Home() {
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-4 flex items-center gap-2">
           <span>⚠️</span>
           <span>{error}</span>
+        </div>
+      )}
+
+      {/* Conversion Funnel */}
+      {!loading && quotations.length > 0 && (
+        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-8">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4">Dönüşüm Hunisi</h2>
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+            {(() => {
+              const statusCounts = quotations.reduce((acc, q) => {
+                acc[q.status] = (acc[q.status] || 0) + 1
+                return acc
+              }, {} as Record<string, number>)
+
+              const total = quotations.length
+              const stages = [
+                { key: 'draft', label: 'Taslak', color: 'bg-amber-500', count: statusCounts['draft'] || 0 },
+                { key: 'sent', label: 'Gönderildi', color: 'bg-blue-500', count: statusCounts['sent'] || 0 },
+                { key: 'approved', label: 'Onaylandı', color: 'bg-emerald-500', count: (statusCounts['approved'] || 0) + (statusCounts['accepted'] || 0) },
+                { key: 'rejected', label: 'Reddedildi', color: 'bg-red-500', count: statusCounts['rejected'] || 0 },
+                { key: 'expired', label: 'Süresi Dolmuş', color: 'bg-gray-400', count: statusCounts['expired'] || 0 },
+              ]
+
+              return stages.map(stage => (
+                <div key={stage.key} className="text-center">
+                  <div className="text-2xl font-bold text-gray-900">{stage.count}</div>
+                  <div className="text-xs text-gray-500 mb-2">{stage.label}</div>
+                  <div className="w-full bg-gray-100 rounded-full h-2">
+                    <div
+                      className={`${stage.color} h-2 rounded-full transition-all`}
+                      style={{ width: total > 0 ? `${(stage.count / total) * 100}%` : '0%' }}
+                    />
+                  </div>
+                  <div className="text-xs text-gray-400 mt-1">
+                    {total > 0 ? Math.round((stage.count / total) * 100) : 0}%
+                  </div>
+                </div>
+              ))
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* Top Customers */}
+      {!loading && quotations.length > 0 && (
+        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-8">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4">En İyi Müşteriler</h2>
+          <div className="space-y-3">
+            {(() => {
+              const byCompany: Record<string, { name: string; total: number; count: number }> = {}
+              quotations.forEach(q => {
+                const name = q.companies?.name || 'Bilinmeyen'
+                if (!byCompany[name]) byCompany[name] = { name, total: 0, count: 0 }
+                byCompany[name].total += q.final_amount || 0
+                byCompany[name].count++
+              })
+              return Object.values(byCompany)
+                .sort((a, b) => b.total - a.total)
+                .slice(0, 5)
+                .map((c, i) => (
+                  <div key={c.name} className="flex items-center gap-3">
+                    <span className="text-sm font-bold text-gray-400 w-6">{i + 1}.</span>
+                    <span className="flex-1 text-sm font-medium text-gray-800">{c.name}</span>
+                    <span className="text-sm text-gray-500">{c.count} teklif</span>
+                    <span className="text-sm font-semibold text-gray-900">
+                      {c.total.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                ))
+            })()}
+          </div>
         </div>
       )}
 

@@ -11,17 +11,30 @@ export async function POST(request: NextRequest) {
     }
 
     if (applyToAll) {
-      await supabase.from('match_analytics').update({ matched_product_id: null }).not('matched_product_id', 'is', null)
-      const { error, count } = await supabase.from('products').delete({ count: 'exact' }).not('id', 'is', null)
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      const { error, count } = await supabase
+        .from('products')
+        .delete({ count: 'exact' })
+        .not('id', 'is', null)
+
+      if (error) {
+        console.error('bulk-delete-products (applyToAll) error:', error)
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
       return NextResponse.json({ deleted: count || 0, errors: 0 })
     }
 
-    await supabase.from('match_analytics').update({ matched_product_id: null }).in('matched_product_id', ids)
-    const { error, count } = await supabase.from('products').delete({ count: 'exact' }).in('id', ids)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const { error, count } = await supabase
+      .from('products')
+      .delete({ count: 'exact' })
+      .in('id', ids)
+
+    if (error) {
+      console.error('bulk-delete-products error:', error)
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
     return NextResponse.json({ deleted: count || 0, errors: 0 })
   } catch (error: any) {
+    console.error('bulk-delete-products error:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

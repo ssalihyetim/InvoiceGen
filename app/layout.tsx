@@ -3,6 +3,7 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import { useState } from 'react'
+import { AuthProvider } from '@/lib/auth-context'
 
 export default function RootLayout({
   children,
@@ -19,6 +20,7 @@ export default function RootLayout({
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
       </head>
       <body className="min-h-screen bg-gray-50">
+        <AuthProvider>
         <div className="flex h-screen">
           {/* Mobile Header - csak mobilde görünür */}
           <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-indigo-900 border-b border-indigo-700 px-4 py-3 flex items-center justify-between">
@@ -102,12 +104,44 @@ export default function RootLayout({
                 <span>Teklifler</span>
               </a>
               <a
+                href="/pipeline"
+                className="flex items-center gap-3 px-4 py-2.5 text-indigo-100 hover:bg-indigo-700 hover:text-white rounded-xl min-h-[44px] transition-colors font-medium"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <span className="text-lg">📊</span>
+                <span>Pipeline</span>
+              </a>
+              <a
                 href="/import"
                 className="flex items-center gap-3 px-4 py-2.5 text-indigo-100 hover:bg-indigo-700 hover:text-white rounded-xl min-h-[44px] transition-colors font-medium"
                 onClick={() => setMobileMenuOpen(false)}
               >
                 <span className="text-lg">📤</span>
                 <span>Dosya Yükle</span>
+              </a>
+              <a
+                href="/settings/users"
+                className="flex items-center gap-3 px-4 py-2.5 text-indigo-100 hover:bg-indigo-700 hover:text-white rounded-xl min-h-[44px] transition-colors font-medium"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <span className="text-lg">👥</span>
+                <span>Kullanıcılar</span>
+              </a>
+              <a
+                href="/settings/discounts"
+                className="flex items-center gap-3 px-4 py-2.5 text-indigo-100 hover:bg-indigo-700 hover:text-white rounded-xl min-h-[44px] transition-colors font-medium"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <span className="text-lg">💰</span>
+                <span>İskontolar</span>
+              </a>
+              <a
+                href="/admin/audit-log"
+                className="flex items-center gap-3 px-4 py-2.5 text-indigo-100 hover:bg-indigo-700 hover:text-white rounded-xl min-h-[44px] transition-colors font-medium"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <span className="text-lg">📝</span>
+                <span>Denetim Kaydı</span>
               </a>
             </nav>
             <div className="px-3 pb-4">
@@ -130,6 +164,7 @@ export default function RootLayout({
             </div>
           </main>
         </div>
+        </AuthProvider>
       </body>
     </html>
   )

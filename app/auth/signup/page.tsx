@@ -2,13 +2,14 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
 import { createSupabaseBrowserClient } from '@/lib/supabase-browser'
+import Link from 'next/link'
 
-export default function LoginPage() {
+export default function SignupPage() {
   const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [companyName, setCompanyName] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -18,11 +19,54 @@ export default function LoginPage() {
     setError(null)
     setLoading(true)
 
-    const supabase = createSupabaseBrowserClient()
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    if (password.length < 6) {
+      setError('Şifre en az 6 karakter olmalıdır')
+      setLoading(false)
+      return
+    }
 
-    if (error) {
-      setError(error.message)
+    if (!companyName.trim()) {
+      setError('Firma adı gereklidir')
+      setLoading(false)
+      return
+    }
+
+    const supabase = createSupabaseBrowserClient()
+
+    // 1. Create auth user
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email,
+      password,
+    })
+
+    if (authError) {
+      setError(authError.message)
+      setLoading(false)
+      return
+    }
+
+    if (!authData.user) {
+      setError('Kullanıcı oluşturulamadı')
+      setLoading(false)
+      return
+    }
+
+    // 2. Create tenant + tenant_user via RPC
+    const slug = companyName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      + '-' + Date.now().toString(36)
+
+    const { error: tenantError } = await supabase.rpc('create_tenant_with_admin', {
+      p_tenant_name: companyName.trim(),
+      p_tenant_slug: slug,
+      p_user_id: authData.user.id,
+    })
+
+    if (tenantError) {
+      console.error('Tenant creation error:', tenantError)
+      setError('Firma oluşturulurken hata: ' + tenantError.message)
       setLoading(false)
       return
     }
@@ -34,8 +78,19 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="bg-white rounded-xl shadow-md p-8 w-full max-w-sm">
-        <h1 className="text-2xl font-bold text-gray-800 mb-6">Giriş Yap</h1>
+        <h1 className="text-2xl font-bold text-gray-800 mb-6">Kayıt Ol</h1>
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Firma Adı</label>
+            <input
+              type="text"
+              value={companyName}
+              onChange={e => setCompanyName(e.target.value)}
+              required
+              placeholder="Örn: ABC Plastik San. Tic."
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
             <input
@@ -54,6 +109,7 @@ export default function LoginPage() {
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 required
+                minLength={6}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <button
@@ -62,16 +118,7 @@ export default function LoginPage() {
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                 tabIndex={-1}
               >
-                {showPassword ? (
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 4.411m0 0L21 21" />
-                  </svg>
-                ) : (
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                  </svg>
-                )}
+                {showPassword ? '🙈' : '👁'}
               </button>
             </div>
           </div>
@@ -83,13 +130,13 @@ export default function LoginPage() {
             disabled={loading}
             className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium py-2 rounded-lg transition-colors"
           >
-            {loading ? 'Giriş yapılıyor...' : 'Giriş Yap'}
+            {loading ? 'Kayıt yapılıyor...' : 'Kayıt Ol'}
           </button>
         </form>
         <p className="mt-4 text-sm text-center text-gray-600">
-          Hesabınız yok mu?{' '}
-          <Link href="/auth/signup" className="text-blue-600 hover:underline">
-            Kayıt Ol
+          Zaten hesabınız var mı?{' '}
+          <Link href="/auth/login" className="text-blue-600 hover:underline">
+            Giriş Yap
           </Link>
         </p>
       </div>

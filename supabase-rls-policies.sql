@@ -1,0 +1,30 @@
+-- ============================================
+-- Supabase RLS Policies — Multi-Tenant (FAZ 1)
+-- ============================================
+-- Bu dosya referans amaçlıdır. Gerçek migration:
+-- supabase/migrations/20260315_multi_tenant.sql
+--
+-- Tüm tablolar tenant_id ile izole edilmiştir.
+-- public.get_tenant_id() fonksiyonu ile kullanıcının tenant_id'si alınır.
+-- Eski "USING(true)" politikaları kaldırılmıştır.
+--
+-- Politika özeti:
+-- ┌──────────────────┬──────────┬──────────┬──────────┬──────────┐
+-- │ Tablo            │ SELECT   │ INSERT   │ UPDATE   │ DELETE   │
+-- ├──────────────────┼──────────┼──────────┼──────────┼──────────┤
+-- │ tenants          │ tenant   │ -        │ -        │ -        │
+-- │ tenant_users     │ tenant   │ admin    │ admin    │ admin    │
+-- │ products         │ tenant   │ tenant   │ tenant   │ tenant   │
+-- │ companies        │ tenant   │ tenant   │ tenant   │ tenant   │
+-- │ quotations       │ tenant   │ tenant   │ tenant   │ tenant   │
+-- │ quotation_items  │ tenant   │ tenant   │ tenant   │ tenant   │
+-- │ discount_rules   │ tenant   │ tenant   │ tenant   │ tenant   │
+-- │ import_history   │ tenant   │ tenant   │ -        │ -        │
+-- │ match_analytics  │ tenant   │ anon+auth│ -        │ -        │
+-- └──────────────────┴──────────┴──────────┴──────────┴──────────┘
+--
+-- "tenant" = USING(tenant_id = public.get_tenant_id())
+-- "admin"  = AND public.get_user_role() = 'admin'
+-- "anon"   = Edge function insert (match-product)
+--
+-- Detaylı SQL: supabase/migrations/20260315_multi_tenant.sql
