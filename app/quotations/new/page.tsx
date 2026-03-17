@@ -7,6 +7,7 @@ import ImageUploadTab from '@/components/quotations/ImageUploadTab'
 import ProductSelectionModal from '@/components/quotations/ProductSelectionModal'
 import BatchMultiMatchModal from '@/components/quotations/BatchMultiMatchModal'
 import { generateQuotationPDF } from '@/lib/pdf-generator'
+import { useAuth } from '@/lib/auth-context'
 
 // Supabase Edge Function URL
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -37,6 +38,7 @@ type QuotationItem = {
 }
 
 export default function NewQuotationPage() {
+  const { tenantId } = useAuth()
   const [companies, setCompanies] = useState<Company[]>([])
   const [selectedCompany, setSelectedCompany] = useState<string>('')
   const [customerRequest, setCustomerRequest] = useState('')
@@ -485,6 +487,7 @@ export default function NewQuotationPage() {
         .from('quotations')
         .insert({
           company_id: selectedCompany,
+          tenant_id: tenantId,
           quotation_number: '',  // Trigger will auto-generate
           status: 'draft',
           total_amount: totals.total,
@@ -510,6 +513,7 @@ export default function NewQuotationPage() {
       // Teklif kalemlerini ekle
       const quotationItems = items.map(item => ({
         quotation_id: quotation.id,
+        tenant_id: tenantId,
         product_id: item.product.id,
         quantity: item.quantity,
         unit_price: item.product.base_price,

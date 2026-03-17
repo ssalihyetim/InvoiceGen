@@ -53,15 +53,31 @@ Sadece JSON array döndür, başka hiçbir şey yazma.
 Örnek: [{"product_code":"NTG-EF-63","product":"HDPE Elektrofüzyon Ek Parça 63mm","quantity":10,"unit":"adet"}]
 Ürün yoksa: []`
 
-    const result = await model.generateContent([
-      { text: prompt },
-      {
-        inlineData: {
-          mimeType,
-          data: base64Data,
-        },
-      },
-    ])
+    // Retry mekanizması — Gemini 503 "high demand" hatası için
+    let result
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        result = await model.generateContent([
+          { text: prompt },
+          {
+            inlineData: {
+              mimeType,
+              data: base64Data,
+            },
+          },
+        ])
+        break // Başarılı, döngüden çık
+      } catch (retryError: any) {
+        console.error(`Gemini attempt ${attempt}/3 failed:`, retryError.message)
+        if (attempt === 3) throw retryError
+        // 2s, 4s bekle
+        await new Promise(resolve => setTimeout(resolve, attempt * 2000))
+      }
+    }
+
+    if (!result) {
+      return NextResponse.json({ error: 'Gemini yanıt vermedi.' }, { status: 503 })
+    }
 
     const content = result.response.text()
     const cleaned = content

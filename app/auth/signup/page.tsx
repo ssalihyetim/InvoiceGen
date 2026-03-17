@@ -65,8 +65,8 @@ export default function SignupPage() {
     })
 
     if (tenantError) {
-      console.error('Tenant creation error:', tenantError)
-      setError('Firma oluşturulurken hata: ' + tenantError.message)
+      console.error('Tenant creation error:', JSON.stringify(tenantError, null, 2))
+      setError('Firma oluşturulurken hata: ' + (tenantError.message || tenantError.details || JSON.stringify(tenantError)))
       setLoading(false)
       return
     }

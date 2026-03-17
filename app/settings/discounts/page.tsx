@@ -18,7 +18,7 @@ type DiscountRule = {
 }
 
 export default function DiscountsPage() {
-  const { role } = useAuth()
+  const { role, tenantId } = useAuth()
   const [rules, setRules] = useState<DiscountRule[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
   const [loading, setLoading] = useState(true)
@@ -61,6 +61,7 @@ export default function DiscountsPage() {
 
     const supabase = createSupabaseBrowserClient()
     const { error } = await supabase.from('discount_rules').insert({
+      tenant_id: tenantId,
       company_id: formCompanyId,
       product_type: formProductType || null,
       discount_percentage: formPercentage,
