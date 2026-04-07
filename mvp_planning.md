@@ -147,9 +147,11 @@ Faz 15 (Audit Log) ✅
     ↓
 Faz 16 (Ticari Dalga 1) ✅
     ↓
-Faz 17 (Ticari Dalga 2) ✅ ← ŞU AN BURADA
+Faz 17 (Ticari Dalga 2) ✅
     ↓
-SONRAKI: DB migration'ları Supabase'e uygula → Production deploy → E2E test
+Faz 18 (Entegrasyon & Stabilizasyon) ← ŞU AN BURADA
+    ↓
+SONRAKI: Edge Function deploy → OCR eşleştirme doğrulama → E2E test
 ```
 
 ---
@@ -167,25 +169,43 @@ SONRAKI: DB migration'ları Supabase'e uygula → Production deploy → E2E test
 | Faz 15 (Audit Log) | ✅ Tamamlandı |
 | Faz 16 (Ticari Dalga 1) | ✅ Tamamlandı |
 | Faz 17 (Ticari Dalga 2) | ✅ Tamamlandı |
-| Migration + Deploy + E2E Test | ⏳ Bekliyor |
+| Migration + Deploy | ✅ Tamamlandı (SQL'ler çalıştırıldı) |
+| Faz 18 (Entegrasyon & Stabilizasyon) | 🔄 Devam ediyor |
 
-## Sonraki Adım — Migration & Deploy
+## Sonraki Adımlar — Yapılması Gerekenler
 
-1. Supabase Dashboard SQL Editor'da migration'ları sırayla çalıştır:
-   - `supabase/migrations/20260315_multi_tenant.sql`
-   - `supabase/migrations/20260315_audit_log.sql`
-   - `supabase/migrations/20260315_quotation_validity.sql`
-   - `supabase/migrations/20260315_commercial_wave2.sql`
-2. Vercel'e env var ekle: `RESEND_API_KEY` (email için)
-3. Git push → Vercel auto-deploy
-4. E2E test:
-   - Yeni kayıt → tenant oluşturma
-   - Multi-tenant izolasyon (farklı tenant verileri görünmemeli)
-   - Rol değiştirme → UI/API erişim kontrolü
-   - Audit log kaydı kontrolü
-   - Pipeline kanban → durum değiştirme
-   - İskonto kuralı oluşturma
-   - PDF indirme (tenant adı + geçerlilik tarihi)
+### 🔴 Kritik (Hemen Yapılmalı)
+
+1. **Edge Function deploy**: `supabase functions deploy match-product` — OCR eşleştirme düzeltmeleri deploy edilmeden aktif olmaz
+2. **OCR eşleştirme doğrulama**: Deploy sonrası farklı ürünlerle test et, hâlâ yanlış eşleşiyorsa logları kontrol et: `supabase functions logs match-product --tail`
+3. **Mevcut verilere tenant_id ata**: Eski veriler (migration öncesi) tenant_id=NULL olabilir, default tenant'a atanmalı
+
+### 🟡 Kısa Vadeli
+
+4. **Email entegrasyonu**: resend.com'dan API key al → Vercel'e `RESEND_API_KEY` ekle → teklif email gönderme aktif olur
+5. **E2E test**: Kayıt → firma ekle → ürün import → teklif oluştur → OCR → durum değiştir → PDF indir
+6. **Custom domain** (opsiyonel): Vercel Dashboard'dan alan adı bağla
+
+### 🟢 Gelecek İyileştirmeler
+
+7. **Excel teklif export**: PDF yanında Excel çıktısı
+8. **Bildirim merkezi**: Navbar'da bildirim ikonu + dropdown
+9. **Dashboard grafikleri**: Aylık teklif trendi, dönüşüm oranı
+10. **Döviz kuru otomatik güncelleme**: TCMB API ile günlük çekme (pg_cron)
+
+## Bugfix Sessiyonu 9 — tenant_id Eksik Insert'ler + Durum Değiştirme (2026-04-07)
+
+### Sorunlar ve Düzeltmeler
+
+1. **Hydration hatası** (`layout.tsx`): `'use client'` root layout'ta Next.js font class'ı server/client arasında farklı oluşuyordu. Düzeltme: `<html suppressHydrationWarning>` eklendi.
+
+2. **tenant_id NULL insert hatası**: Tüm client-side sayfalar (quotations/new, edit, companies, products, discounts, import) `tenant_id` göndermiyordu → `NOT NULL` constraint hatası. Düzeltme: Her sayfaya `useAuth()` + `tenant_id` eklendi.
+
+3. **Teklif durum değiştirme**: Teklifler sayfasında durum sadece badge olarak gösteriliyordu, değiştirilemiyordu. Düzeltme: Badge yerine dropdown eklendi (Taslak/Gönderildi/Onaylandı/Reddedildi).
+
+4. **OCR Gemini 503**: Yoğunluk hatası için 3 deneme retry mekanizması eklendi (2s, 4s bekleme).
+
+5. **Migration SQL hataları**: `auth` schema izin sorunu (`public` schema'ya taşındı), `UNIQUE` constraint'te cast kullanımı (`rate_date` sütununa çevrildi), trailing comma düzeltildi.
 
 ## Bugfix Sessiyonu 6 — Görsel Eşleştirme: Tüm Ürünler İlk Ürüne Gidiyordu
 

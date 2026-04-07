@@ -8,6 +8,7 @@ import ImageUploadTab from '@/components/quotations/ImageUploadTab'
 import ProductSelectionModal from '@/components/quotations/ProductSelectionModal'
 import BatchMultiMatchModal from '@/components/quotations/BatchMultiMatchModal'
 import { generateQuotationPDF } from '@/lib/pdf-generator'
+import { useAuth } from '@/lib/auth-context'
 
 // Supabase Edge Function URL
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -38,6 +39,7 @@ type QuotationItem = {
 }
 
 export default function EditQuotationPage() {
+  const { tenantId } = useAuth()
   const params = useParams()
   const router = useRouter()
   const quotationId = params?.id as string
@@ -540,6 +542,7 @@ export default function EditQuotationPage() {
       // 3. Insert new quotation_items
       const quotationItems = items.map(item => ({
         quotation_id: quotationId,
+        tenant_id: tenantId,
         product_id: item.product.id,
         quantity: item.quantity,
         unit_price: item.product.base_price,

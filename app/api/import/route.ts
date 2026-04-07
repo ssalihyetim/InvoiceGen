@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { products, fileName, fileSize } = body
+    const { products, fileName, fileSize, tenant_id } = body
 
     if (!products || !Array.isArray(products)) {
       return NextResponse.json({ error: 'Invalid data' }, { status: 400 })
@@ -76,6 +76,7 @@ export async function POST(request: NextRequest) {
           currency: currency,
           unit: product.unit || 'adet',
           description: product.description || null,
+          ...(tenant_id ? { tenant_id } : {}),
         }
 
         validProducts.push(productData)
@@ -128,6 +129,7 @@ export async function POST(request: NextRequest) {
           successful_imports: successCount,
           failed_imports: failedCount,
           error_log: errors.length > 0 ? errors : null,
+          ...(tenant_id ? { tenant_id } : {}),
         })
 
       if (historyError) {

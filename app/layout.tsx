@@ -13,7 +13,7 @@ export default function RootLayout({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   return (
-    <html lang="tr">
+    <html lang="tr" suppressHydrationWarning>
       <head>
         <title>Teklif Yönetim Sistemi</title>
         <meta name="description" content="Otomatik teklif oluşturma ve yönetim sistemi" />

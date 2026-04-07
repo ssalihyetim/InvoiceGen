@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import { generateQuotationPDF } from '@/lib/pdf-generator'
+import { useAuth } from '@/lib/auth-context'
 
 type Quotation = {
   id: string
@@ -30,6 +31,7 @@ const STATUS_STYLES: Record<string, string> = {
   sent: 'bg-blue-100 text-blue-700 ring-1 ring-blue-200',
   approved: 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200',
   rejected: 'bg-red-100 text-red-700 ring-1 ring-red-200',
+  expired: 'bg-gray-100 text-gray-700 ring-1 ring-gray-200',
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -37,7 +39,10 @@ const STATUS_LABELS: Record<string, string> = {
   sent: 'Gönderildi',
   approved: 'Onaylandı',
   rejected: 'Reddedildi',
+  expired: 'Süresi Doldu',
 }
+
+const STATUS_OPTIONS = ['draft', 'sent', 'approved', 'rejected'] as const
 
 function getCurrencySymbol(currency: string) {
   if (currency === 'TRY' || currency === 'TL') return '₺'
@@ -47,6 +52,7 @@ function getCurrencySymbol(currency: string) {
 }
 
 export default function QuotationsPage() {
+  const { tenantId } = useAuth()
   const [quotations, setQuotations] = useState<Quotation[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingPdf, setLoadingPdf] = useState<string | null>(null)
@@ -154,6 +160,20 @@ export default function QuotationsPage() {
     }
   }
 
+  const handleStatusChange = async (quotationId: string, newStatus: string) => {
+    const { error } = await supabase
+      .from('quotations')
+      .update({ status: newStatus })
+      .eq('id', quotationId)
+
+    if (error) {
+      showToast('error', 'Durum güncellenirken hata: ' + error.message)
+    } else {
+      showToast('success', `Durum "${STATUS_LABELS[newStatus]}" olarak güncellendi.`)
+      loadQuotations()
+    }
+  }
+
   const handleDelete = async (quotationId: string, quotationNumber: string) => {
     if (!confirm(`"${quotationNumber}" teklifi SİLİNECEK! Bu işlem geri alınamaz.`)) return
 
@@ -232,9 +252,15 @@ export default function QuotationsPage() {
                       <td className="px-5 py-3.5 font-mono font-semibold text-gray-900">{quotation.quotation_number}</td>
                       <td className="px-5 py-3.5 text-gray-700">{quotation.companies?.name || '—'}</td>
                       <td className="px-5 py-3.5 text-center">
-                        <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[quotation.status] || STATUS_STYLES.draft}`}>
-                          {STATUS_LABELS[quotation.status] || quotation.status}
-                        </span>
+                        <select
+                          value={quotation.status}
+                          onChange={(e) => handleStatusChange(quotation.id, e.target.value)}
+                          className={`px-2.5 py-1 rounded-full text-xs font-medium border-0 cursor-pointer ${STATUS_STYLES[quotation.status] || STATUS_STYLES.draft}`}
+                        >
+                          {STATUS_OPTIONS.map(s => (
+                            <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+                          ))}
+                        </select>
                       </td>
                       <td className="px-5 py-3.5 text-right font-semibold text-gray-900">
                         {currencies.length === 0 ? (

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/lib/auth-context'
 
 type Product = {
   id: string
@@ -17,6 +18,7 @@ type Product = {
 type Toast = { type: 'success' | 'error'; message: string }
 
 export default function ProductsPage() {
+  const { tenantId } = useAuth()
   const [products, setProducts] = useState<Product[]>([])
   const [totalCount, setTotalCount] = useState<number>(0)
   const [search, setSearch] = useState('')
@@ -134,7 +136,8 @@ export default function ProductsPage() {
       base_price: price,
       currency: formData.currency,
       unit: formData.unit.trim() || 'adet',
-      description: formData.description.trim() || null
+      description: formData.description.trim() || null,
+      ...(editingId ? {} : { tenant_id: tenantId }),
     }
 
     const op = editingId
