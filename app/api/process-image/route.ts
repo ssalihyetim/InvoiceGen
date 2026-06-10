@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { getAuthContext } from '@/lib/api-auth'
+
+// ~10 MB binary ≈ 14M base64 chars. The client resizes to 2048px before
+// upload (~300 KB), so this only stops abuse, not legitimate use.
+const MAX_IMAGE_CHARS = 14_000_000
 
 export async function POST(request: NextRequest) {
+  const auth = await getAuthContext(request)
+  if (auth instanceof NextResponse) return auth
+
   try {
     const apiKey = process.env.GOOGLE_API_KEY
     if (!apiKey) {
@@ -18,6 +26,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Görsel verisi gerekli.' }, { status: 400 })
     }
 
+    if (image.length > MAX_IMAGE_CHARS) {
+      return NextResponse.json({ error: 'Görsel çok büyük (maks. ~10MB).' }, { status: 413 })
+    }
+
     // Base64 data URL'den saf base64 ve mime type ayır
     const matches = image.match(/^data:(.+);base64,(.+)$/)
     if (!matches) {
@@ -32,13 +44,14 @@ export async function POST(request: NextRequest) {
       generationConfig: {
         temperature: 0.1,
         maxOutputTokens: 8192,
+        // @ts-ignore — Gemini 2.5 thinking config
+        thinkingConfig: { thinkingBudget: 0 },
       },
     })
 
     const prompt = `Sen Türk endüstriyel ürün listesi tablolarını analiz eden bir uzmansın.
 
 Tablodaki TÜM ürün satırlarını JSON array olarak çıkar.
-Önce tabloda kaç ürün satırı olduğunu say, sonra hepsini listele.
 Hiçbir satırı atlama — büyük liste olsa bile tümünü yaz.
 Başlık satırlarını, toplam satırlarını ve boş satırları atla.
 
@@ -52,15 +65,31 @@ Sadece JSON array döndür, başka hiçbir şey yazma.
 Örnek: [{"product_code":"NTG-EF-63","product":"HDPE Elektrofüzyon Ek Parça 63mm","quantity":10,"unit":"adet"}]
 Ürün yoksa: []`
 
-    const result = await model.generateContent([
-      { text: prompt },
-      {
-        inlineData: {
-          mimeType,
-          data: base64Data,
-        },
-      },
-    ])
+    // Retry mekanizması — Gemini 503 "high demand" hatası için
+    let result
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        result = await model.generateContent([
+          { text: prompt },
+          {
+            inlineData: {
+              mimeType,
+              data: base64Data,
+            },
+          },
+        ])
+        break // Başarılı, döngüden çık
+      } catch (retryError: any) {
+        console.error(`Gemini attempt ${attempt}/3 failed:`, retryError.message)
+        if (attempt === 3) throw retryError
+        // 2s, 4s bekle
+        await new Promise(resolve => setTimeout(resolve, attempt * 2000))
+      }
+    }
+
+    if (!result) {
+      return NextResponse.json({ error: 'Gemini yanıt vermedi.' }, { status: 503 })
+    }
 
     const content = result.response.text()
     const cleaned = content
@@ -91,11 +120,15 @@ Sadece JSON array döndür, başka hiçbir şey yazma.
       }
     }
 
-    const requests = parsed.map((item) => ({
-      talep: item.product_code?.trim() || item.product || '',
-      miktar: typeof item.quantity === 'number' ? item.quantity : 1,
-      birim: item.unit ?? 'adet',
-    }))
+    const requests = parsed.map((item) => {
+      const code = item.product_code?.trim() || ''
+      const desc = item.product?.trim() || ''
+      return {
+        talep: desc ? (code ? `${code} ${desc}` : desc) : code,
+        miktar: typeof item.quantity === 'number' ? item.quantity : 1,
+        birim: item.unit ?? 'adet',
+      }
+    })
 
     return NextResponse.json({ requests })
   } catch (error: any) {

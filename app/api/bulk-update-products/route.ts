@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { getAuthContext, requirePermission } from '@/lib/api-auth'
 
 export async function POST(request: NextRequest) {
+  const auth = await getAuthContext(request)
+  if (auth instanceof NextResponse) return auth
+
+  const denied = requirePermission(auth, 'products', 'update')
+  if (denied) return denied
+
+  const { supabase, tenantId } = auth
+
   try {
     const body = await request.json()
     const { ids, updates, applyToAll } = body
@@ -18,6 +26,7 @@ export async function POST(request: NextRequest) {
     if (unit) simpleUpdate.unit = unit
 
     // applyToAll: simple fields without multiplier — single DB update
+    // (tenant filter is defense-in-depth on top of RLS)
     if (applyToAll && Math.abs(multiplier - 1.0) < 0.0001) {
       if (Object.keys(simpleUpdate).length === 0) {
         return NextResponse.json({ success: 0, message: 'Değişiklik yok' })
@@ -25,16 +34,22 @@ export async function POST(request: NextRequest) {
       const { error } = await (supabase as any)
         .from('products')
         .update(simpleUpdate)
-        .not('id', 'is', null)
+        .eq('tenant_id', tenantId)
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-      const { count } = await supabase.from('products').select('*', { count: 'exact', head: true })
+      const { count } = await supabase
+        .from('products')
+        .select('*', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
       return NextResponse.json({ success: count || 0 })
     }
 
     // Resolve ID list: either from client or fetch all from DB
     let targetIds: string[] = ids || []
     if (applyToAll) {
-      const { data: allProducts } = await supabase.from('products').select('id')
+      const { data: allProducts } = await supabase
+        .from('products')
+        .select('id')
+        .eq('tenant_id', tenantId)
       targetIds = allProducts?.map((p: any) => p.id) || []
     }
 
@@ -43,12 +58,17 @@ export async function POST(request: NextRequest) {
       if (Object.keys(simpleUpdate).length === 0) {
         return NextResponse.json({ success: 0, message: 'Değişiklik yok' })
       }
-      const { error } = await supabase.from('products').update(simpleUpdate).in('id', targetIds)
+      const { error } = await supabase
+        .from('products')
+        .update(simpleUpdate)
+        .eq('tenant_id', tenantId)
+        .in('id', targetIds)
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
       return NextResponse.json({ success: targetIds.length })
     }
 
-    // Price multiplier: fetch → compute → upsert in server-side batches of 500
+    // Price multiplier: fetch → compute → upsert in server-side batches of 500.
+    // The select is tenant-filtered, so upsert rows can only contain own-tenant ids.
     const BATCH_SIZE = 500
     let successCount = 0
 
@@ -58,6 +78,7 @@ export async function POST(request: NextRequest) {
       const { data: products } = await supabase
         .from('products')
         .select('id, base_price')
+        .eq('tenant_id', tenantId)
         .in('id', batchIds)
 
       if (!products) continue

@@ -1,11 +1,11 @@
 # MVP Planlama
 
-**Proje Durumu**: 9/12 faz tamamlandı (%75) + Görsel Yükle iyileştirmesi + kritik bugfix sessiyonları + Session 3-4 iyileştirmeleri
-**Güncelleme**: 2026-03-07
+**Proje Durumu**: MVP tamamlandı ✅ — Production'da, son test aşamasında
+**Güncelleme**: 2026-03-08
 
 ---
 
-## Tamamlanan Fazlar (1–9)
+## Tamamlanan Fazlar (1–9 + 11)
 
 - Faz 1: Altyapı ve kurulum
 - Faz 2: Veritabanı şeması
@@ -55,6 +55,19 @@
   - Toplu silme FK hatası (root cause): `match_analytics` tablosunda `matched_product_id` FK constraint CASCADE'siz oluşturulmuştu. Production'da match_analytics verisi var; anon key DELETE izni olmayabilir → silently fail → products delete → FK violation.
   - Çözüm (primer): FK constraint'e `ON DELETE CASCADE` eklendi (Supabase Dashboard SQL ile)
   - Çözüm (sekonder): `bulk-delete-products/route.ts` — match_analytics delete hatasını yakala ve console.error ile logla (artık silently fail yok)
+- Bugfix Sessiyonu 5 (2026-03-08):
+  - UI yenileme: Sidebar indigo gradient temaya alındı, emojili nav linkleri eklendi (🏠📦🏢📄📤)
+  - Dashboard: Kart emojileri, ciro kartı indigo gradient, status badge ring stilleri eklendi
+  - Toplu silme "Invalid API key": supabaseAdmin (SUPABASE_SERVICE_ROLE_KEY gerektiren) yaklaşımı geri alındı. DB'de zaten `ON DELETE CASCADE` olduğu için route sadeleştirildi — doğrudan products delete, match_analytics cascade ile otomatik temizleniyor.
+- ✅ **Faz 11: Test & İyileştirme (2026-03-08)** — TAMAMLANDI
+  - ✅ Hata yönetimi: alert() → toast notification (companies, quotations, products sayfaları)
+  - ✅ Loading state: tüm sayfalarda yükleme göstergesi
+  - ✅ Boş durum UI: anlamlı mesajlar ve yönlendirici butonlar
+  - ✅ UI tutarlılığı: indigo tema sidebar + dashboard
+  - ✅ Mobile responsive: tablolarda overflow-x-auto, sidebar mobile menü mevcut
+  - ✅ Network error fallback: loadProducts try/catch → toast notification
+  - ✅ Performance: 1000'er batch pagination (products + quotations)
+  - ✅ Ürünler sayfasına filtreler: "Fiyat Sorunuz" (zeroPriceOnly), para birimi filtresi, aktif filtre sayacı
 
 ---
 
@@ -62,88 +75,181 @@
 
 ### 🔴 Kritik Yol (MVP için zorunlu)
 
-#### ~~Faz 9 – Multi-Tenant Authentication~~ ✅ Tamamlandı
+#### Faz 10 – Export (kısmen tamamlandı)
 
-#### Faz 10 – Export (2 gün)
-**Neden ikinci?** Müşteriye teklif gönderebilmek için PDF/Excel export şart.
+Tamamlananlar:
+- [x] PDF teklif export (`lib/pdf-generator.ts` — jsPDF, TR karakter desteği, firma bilgisi + ürün tablosu + toplamlar)
+- [x] PDF indirme butonu teklifler sayfasında (📄 PDF)
 
-İş kalemleri:
-- [ ] PDF teklif export (jsPDF veya react-pdf)
-  - Firma logosu, teklif numarası, ürün tablosu, toplamlar
-- [ ] Excel teklif export (SheetJS)
-- [ ] Email gönderme (Resend veya SendGrid entegrasyonu)
-  - Teklifi PDF olarak müşteri emailine gönder
-- [ ] Export butonlarını teklif detay sayfasına ekle
+Kalan:
+- [ ] Excel teklif export (SheetJS) — opsiyonel, PDF yeterli olabilir
+- [ ] Email gönderme (Resend veya SendGrid) — opsiyonel MVP sonrası
 
-#### Faz 12 – Production Deployment (1 gün)
-**Neden üçüncü?** Test ve deployment bir arada yapılabilir.
+#### ✅ Faz 12 – Production Deployment — TAMAMLANDI
 
 İş kalemleri:
-- [x] Vercel deployment konfigürasyonu (`vercel.json` eklendi — import: 60s, process-image: 60s timeout)
-- [ ] Vercel Dashboard'da GitHub bağlantısı kur (`ssalihyetim/InvoiceGen` → main branch)
-- [ ] Environment variables (production Supabase URL/key, OpenAI key) → Vercel Dashboard'a ekle
+- [x] Vercel deployment konfigürasyonu (`vercel.json` — import: 60s, process-image: 60s timeout)
+- [x] Vercel Dashboard'da GitHub bağlantısı aktif (`ssalihyetim/InvoiceGen` → main branch, auto-deploy)
+- [x] Environment variables eklendi: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `GOOGLE_API_KEY` (All Environments)
+- [x] Supabase RLS güncellendi: `authenticated` rolüne kısıtlandı (eski "public" USING(true) kaldırıldı)
+- [ ] Production end-to-end test (login → import → teklif → PDF)
 - [ ] Custom domain (opsiyonel)
-- [ ] Supabase production RLS politikalarını doğrula
 
 ---
 
-### 🟡 Önemli ama MVP sonrası olabilir
+### 🟡 Ticari Hazırlık Fazları (2026-03-15)
 
-#### Faz 11 – Test & İyileştirme (2 gün)
-Deployment öncesi veya sonrası yapılabilir.
+#### ✅ Faz 13 — Kritik Bug Fix + Multi-Tenant (2026-03-15)
+- [x] **FAZ 0**: Ürün eşleştirme bug fix — ağırlıklı keyword scoring, ürün tipi sözlüğü, isMultiMatch threshold
+- [x] **FAZ 1**: Multi-tenant DB — tenants/tenant_users tabloları, tüm tablolara tenant_id, RLS politikaları
+- [x] Signup sayfası + tenant oluşturma akışı
+- [x] AuthProvider context (user, role, tenantId)
 
-İş kalemleri:
-- [ ] End-to-end test senaryoları (import → teklif → export akışı)
-- [ ] Hata yönetimi iyileştirmeleri (boş state, network error)
-- [ ] Mobile responsive kontrol
-- [ ] Performance profiling (büyük ürün kataloglarında sayfa yükleme)
-- [ ] Browser compatibility (Chrome, Firefox, Safari)
+#### ✅ Faz 14 — RBAC (2026-03-15)
+- [x] 5 rol: admin, manager, sales, accountant, viewer
+- [x] `lib/permissions.ts` — canPerform() + rol matrisi
+- [x] `components/PermissionGate.tsx` — UI yetki kontrol wrapper
+- [x] `lib/api-auth.ts` — server-side API yetki kontrolü
+- [x] `app/settings/users/page.tsx` — kullanıcı yönetim sayfası (admin only)
 
-#### Faz 6 – İskonto Yönetimi (1–2 gün)
-Firma bazlı özel iskonto oranları. MVP sonrası eklenebilir.
+#### ✅ Faz 15 — Audit Log (2026-03-15)
+- [x] audit_logs + quotation_versions tabloları
+- [x] DB trigger ile otomatik loglama (products, companies, quotations, quotation_items)
+- [x] `app/admin/audit-log/page.tsx` — filtrelenebilir audit log UI
+- [x] `components/audit/DiffViewer.tsx` — old vs new diff gösterimi
+- [x] `components/companies/ActivityTimeline.tsx` — firma aktivite zaman çizelgesi
 
-İş kalemleri:
-- [ ] `discounts` tablosu (company_id, product_type, percentage)
-- [ ] Firma yönetimi sayfasına iskonto UI
-- [ ] Teklif oluşturmada otomatik iskonto uygulama
+#### ✅ Faz 16 — Ticari Dalga 1 (2026-03-15)
+- [x] İskonto Yönetimi UI (`app/settings/discounts/page.tsx`) + CRUD
+- [x] Teklif geçerlilik süresi (valid_until + expired status + auto-expire fonksiyon)
+- [x] PDF özelleştirme (tenant adı, başlık notu, geçerlilik tarihi, şartlar, alt bilgi)
+- [x] Dashboard analitik (dönüşüm hunisi + en iyi müşteriler)
+
+#### ✅ Faz 17 — Ticari Dalga 2 (2026-03-15)
+- [x] Email otomasyonu (`/api/send-quotation` — Resend SDK, email_logs tablosu)
+- [x] Bildirim sistemi (notifications tablosu + auto-trigger on status change)
+- [x] Döviz kuru tablosu (exchange_rates — TCMB cache)
+- [x] CRM: company_notes + follow_ups tabloları
+- [x] Pipeline Kanban sayfası (`app/pipeline/page.tsx`)
 
 ---
 
 ## Kritik Yol Özeti
 
 ```
-Faz 9 (Auth) ✅
+Faz 1-12: MVP ✅
     ↓
-Faz 10 (Export) ← ŞU AN BURADA
+Faz 13 (Bug Fix + Multi-Tenant) ✅
     ↓
-Faz 12 (Deployment)  ←─── Faz 11 (Test) paralel yapılabilir
+Faz 14 (RBAC) ✅
     ↓
-MVP tamamlandı ✅
+Faz 15 (Audit Log) ✅
     ↓
-Faz 6 (İskonto) ─ sonraki iterasyon
+Faz 16 (Ticari Dalga 1) ✅
+    ↓
+Faz 17 (Ticari Dalga 2) ✅
+    ↓
+Faz 18 (Entegrasyon & Stabilizasyon) ← ŞU AN BURADA
+    ↓
+SONRAKI: Edge Function deploy → OCR eşleştirme doğrulama → E2E test
 ```
 
 ---
 
-## Risk ve Bağımlılıklar
+## Durum Özeti
 
-| Risk | Etki | Azaltma |
-|------|------|---------|
-| RLS migration mevcut veriyi bozabilir | Yüksek | Önce backup al, staging'de test et |
-| PDF library font sorunu (TR karakter) | Orta | jsPDF'te font embedding gerekli |
-| Email deliverability | Düşük | Resend'in test modu ile başla |
-| Vercel env variable sızıntısı | Yüksek | NEXT_PUBLIC_ prefix kuralını uygula |
+| Faz | Durum |
+|-----|-------|
+| Faz 1–5, 7–9 | ✅ Tamamlandı |
+| Faz 10 (PDF Export) | ✅ Tamamlandı |
+| Faz 11 (Test & İyileştirme) | ✅ Tamamlandı |
+| Faz 12 (Deployment) | ✅ Tamamlandı |
+| Faz 13 (Bug Fix + Multi-Tenant) | ✅ Tamamlandı |
+| Faz 14 (RBAC) | ✅ Tamamlandı |
+| Faz 15 (Audit Log) | ✅ Tamamlandı |
+| Faz 16 (Ticari Dalga 1) | ✅ Tamamlandı |
+| Faz 17 (Ticari Dalga 2) | ✅ Tamamlandı |
+| Migration + Deploy | ✅ Tamamlandı (SQL'ler çalıştırıldı) |
+| Faz 18 (Entegrasyon & Stabilizasyon) | 🔄 Devam ediyor |
 
----
+## Sonraki Adımlar — Yapılması Gerekenler
 
-## Tahmini Toplam Süre
+### 🔴 Kritik (Hemen Yapılmalı)
 
-| Faz | Süre |
-|-----|------|
-| Faz 9 | 2–3 gün |
-| Faz 10 | 2 gün |
-| Faz 11 | 2 gün |
-| Faz 12 | 1 gün |
-| **Toplam** | **7–8 gün** |
+1. **Edge Function deploy**: `supabase functions deploy match-product` — OCR eşleştirme düzeltmeleri deploy edilmeden aktif olmaz
+2. **OCR eşleştirme doğrulama**: Deploy sonrası farklı ürünlerle test et, hâlâ yanlış eşleşiyorsa logları kontrol et: `supabase functions logs match-product --tail`
+3. **Mevcut verilere tenant_id ata**: Eski veriler (migration öncesi) tenant_id=NULL olabilir, default tenant'a atanmalı
 
-MVP'ye ulaşmak için yaklaşık 1–2 haftalık çalışma kaldı.
+### 🟡 Kısa Vadeli
+
+4. **Email entegrasyonu**: resend.com'dan API key al → Vercel'e `RESEND_API_KEY` ekle → teklif email gönderme aktif olur
+5. **E2E test**: Kayıt → firma ekle → ürün import → teklif oluştur → OCR → durum değiştir → PDF indir
+6. **Custom domain** (opsiyonel): Vercel Dashboard'dan alan adı bağla
+
+### 🟢 Gelecek İyileştirmeler
+
+7. **Excel teklif export**: PDF yanında Excel çıktısı
+8. **Bildirim merkezi**: Navbar'da bildirim ikonu + dropdown
+9. **Dashboard grafikleri**: Aylık teklif trendi, dönüşüm oranı
+10. **Döviz kuru otomatik güncelleme**: TCMB API ile günlük çekme (pg_cron)
+
+## Bugfix Sessiyonu 9 — tenant_id Eksik Insert'ler + Durum Değiştirme (2026-04-07)
+
+### Sorunlar ve Düzeltmeler
+
+1. **Hydration hatası** (`layout.tsx`): `'use client'` root layout'ta Next.js font class'ı server/client arasında farklı oluşuyordu. Düzeltme: `<html suppressHydrationWarning>` eklendi.
+
+2. **tenant_id NULL insert hatası**: Tüm client-side sayfalar (quotations/new, edit, companies, products, discounts, import) `tenant_id` göndermiyordu → `NOT NULL` constraint hatası. Düzeltme: Her sayfaya `useAuth()` + `tenant_id` eklendi.
+
+3. **Teklif durum değiştirme**: Teklifler sayfasında durum sadece badge olarak gösteriliyordu, değiştirilemiyordu. Düzeltme: Badge yerine dropdown eklendi (Taslak/Gönderildi/Onaylandı/Reddedildi).
+
+4. **OCR Gemini 503**: Yoğunluk hatası için 3 deneme retry mekanizması eklendi (2s, 4s bekleme).
+
+5. **Migration SQL hataları**: `auth` schema izin sorunu (`public` schema'ya taşındı), `UNIQUE` constraint'te cast kullanımı (`rate_date` sütununa çevrildi), trailing comma düzeltildi.
+
+## Bugfix Sessiyonu 6 — Görsel Eşleştirme: Tüm Ürünler İlk Ürüne Gidiyordu
+
+**Tarih**: 2026-03-09
+
+### Kök Nedenler ve Düzeltmeler
+
+1. **measurementPattern dedup**: Tek boyutlu ürünler için aynı sayı iki kez geliyordu ("63-63"), sıfır sonuç üretiyordu. Düzeltme: `uniqueNumbers` ile dedup, tek sayıyı doğrudan pattern olarak kullan.
+2. **ilike fallback kolonü**: `product_type` yerine `search_text` kullanıldı — MANŞON/VANA/ELEKTROFÜZYİON search_text'te bulunuyor.
+3. **AI random-100 bias**: Aday yokken random 100 ürün çekip AI'ye veriyordu → daima DB'deki ilk ürün seçiliyordu. Düzeltme: aday yoksa direkt no-match döndür.
+4. **Deploy eksikliği**: Önceki oturumda uygulanan düzeltmeler (scoring, isMultiMatch threshold) deploy edilmemişti — bu seferki deploy ile birlikte tüm düzeltmeler aktif.
+
+## Bugfix Sessiyonu 7 — Gerçek Kök Neden Bulundu: codePattern Regex
+
+**Tarih**: 2026-03-09
+
+### Gerçek Hata
+
+`parseCustomerRequest()` içindeki `codePattern` regex HİÇBİR ZAMAN "NTG-EF-63" formatındaki kodları yakalayamıyordu:
+- Eski regex: `/[A-Z]{2,}\s*\d+[-\s]\d+/` — iki sayı arasında ayırıcı gerektiriyor
+- "NTG-EF-63" → regex eşleşmez → `productCode = undefined` → exactMatch hiç çalışmaz
+- Tüm istekler FTS'e düşüyor, FTS'de yanlış scoring ile hep aynı ürün dönüyor
+
+### Yapılan Düzeltmeler (deploy edildi)
+
+1. **codePattern regex düzeltildi** (ana fix):
+   - Yeni: `/\b[A-Z]{2,}(?:[-][A-Z0-9]+)+\b/g`
+   - "NTG-EF-63" → yakalar, "NTG-EF-63-50" → yakalar
+
+2. **exactMatch iyileştirildi**:
+   - Önce birebir product_code eşleşmesi (wildcard yok) — "NTG-EF-63" aramasının "NTG-EF-63-50"u getirmesini önler
+   - Birebir bulunamazsa substring ile ara (tek sonuç varsa kabul et)
+
+3. **Null safety** (search_text için):
+   - `product.search_text.toLowerCase()` → `(product.search_text || "").toLowerCase()`
+   - Null search_text olan ürünlerde crash olmaz
+
+## Bugfix Sessiyonu 8 — Stop Words Filtre Hatası
+
+**Tarih**: 2026-03-15
+
+### Hata
+`parseCustomerRequest()` içindeki `stopWords` dizisi küçük harfle tanımlıydı (`'bir'`, `'ve'` vb.) ama kelimeler zaten `toUpperCase()` ile büyük harfe çevrilmişti. `stopWords.includes(w.toUpperCase())` karşılaştırması hiçbir zaman eşleşmiyordu → stop words filtrelenmiyordu.
+
+### Düzeltme
+Stop words dizisi büyük harfe çevrildi: `['BIR', 'VE', 'ILE', 'ICIN', 'ADET', 'METRE', 'KG', 'MM', 'CM', 'LIK']`
+

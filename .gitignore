@@ -26,9 +26,19 @@ yarn-error.log*
 .env*.local
 .env
 
+# real business data — never commit (audit 2026-06-10, open question #8)
+NTG*.xlsx
+
+# local tool state
+.claude/settings.local.json
+supabase/.temp/
+
 # vercel
 .vercel
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# internal working notes / audit — keep local, do not publish
+tasks/

@@ -8,14 +8,166 @@ const corsHeaders = {
 
 // ============================================
 // FAZ 2: Akıllı Parsing + 3 Aşamalı Arama
+// FAZ 0 Fix: Ağırlıklı keyword scoring + ürün tipi sözlüğü
 // ============================================
+
+// Ürün tipi sözlüğü — bu kelimeler ürün tipini belirler, yüksek ağırlık alır
+const PRODUCT_TYPE_TERMS: Record<string, string[]> = {
+  'MANŞON': ['MANSON', 'MANŞON', 'MANSION'],
+  'DİRSEK': ['DIRSEK', 'DİRSEK'],
+  'REDÜKSİYON': ['REDUKSIYON', 'REDÜKSİYON', 'REDUKSI'],
+  'TE': ['TE', 'TEE'],
+  'VANA': ['VANA'],
+  'KELEPÇE': ['KELEPCE', 'KELEPÇE'],
+  'FLANŞ': ['FLANS', 'FLANŞ', 'FLANJ'],
+  'ADAPTÖR': ['ADAPTOR', 'ADAPTÖR', 'ADAPTER'],
+  'KÖRTAPA': ['KORTAPA', 'KÖRTAPA', 'KÖR TAPA'],
+  'ELEKTROFÜZYİON': ['ELEKTROFUZYON', 'ELEKTROFÜZYİON', 'ELEKTROFÜZYON', 'EF'],
+  'ALIN KAYNAK': ['ALIN', 'ALINKAYNAK', 'ALIN KAYNAK'],
+  'BORU': ['BORU'],
+  'EK PARÇA': ['EK PARCA', 'EK PARÇA', 'EKPARCA'],
+  'SEMER': ['SEMER'],
+  'İNEGAL': ['INEGAL', 'İNEGAL'],
+  'EŞIT': ['ESIT', 'EŞIT', 'EŞİT'],
+  'KAPLIN': ['KAPLIN', 'KAPLİN'],
+  'RAKOR': ['RAKOR'],
+}
+
+// Tüm ürün tipi kelimelerinin flat listesi (hızlı lookup için)
+const ALL_TYPE_TERMS = new Set<string>()
+for (const variants of Object.values(PRODUCT_TYPE_TERMS)) {
+  for (const v of variants) ALL_TYPE_TERMS.add(v)
+}
+
+// Malzeme terimleri — orta ağırlık
+const MATERIAL_TERMS = new Set([
+  'HDPE', 'PE', 'PE100', 'PE80', 'PP', 'PPR', 'PVC', 'PPRC',
+  'PN10', 'PN16', 'PN20', 'PN25', 'SDR11', 'SDR17', 'SDR26',
+])
+
+// Eşleşme eşiği — bunun altındaki sonuçlar UI'ya gönderilmez (UI gate 0.3, bu yedek üstü).
+const MIN_CONFIDENCE = 0.35
+
+// Yapısal-kategori çatışma haritası. BORU bir hat ürünü; geri kalanlar bağlantı parçası.
+// Bir hat ürünü (BORU) ile bir bağlantı parçası talebi yapısal olarak zıttır → hard reject.
+// Compound korumalı: çatışma sadece talebin tipi ürünün HİÇBİR tipinde yoksa uygulanır
+// (ör. "KAPLİN DİRSEK" ürünü hem KAPLİN hem DİRSEK içerir, DİRSEK talebini reddetmez).
+const INCOMPATIBLE_TYPES: Record<string, string[]> = {
+  'BORU': ['DİRSEK', 'MANŞON', 'TE', 'REDÜKSİYON', 'RAKOR', 'FLANŞ', 'VANA', 'ADAPTÖR', 'KÖRTAPA', 'SEMER', 'KAPLİN'],
+}
+
+// Türkçe metin normalizasyonu: derece işaretlerini birleştir (° U+00B0 → º U+00BA,
+// katalogda º kullanılıyor), çoklu boşluk sadeleştir. Türkçe İ/I büyük harf tutarlılığı.
+function normalizeText(s: string): string {
+  return s
+    .replace(/°/g, 'º')            // U+00B0 → U+00BA (katalog formatı)
+    .replace(/ /g, ' ')       // non-breaking space
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Basınç/sınıf token'ları — bunlar çap DEĞİL (PN16, SDR11, DN100 gibi).
+const PRESSURE_RE = /^(PN|SDR|DN)\d+$/i
+
+// Talep metninden çapları çıkar. Öncelik: D-prefix > MM-suffix > AxB redüksiyon > en büyük makul sayı.
+// Açılar (90º, 45º) çaptan dışlanır.
+function extractDimensions(raw: string): { diameters: string[]; angles: string[]; primaryDiameter?: string; reductionPattern?: string } {
+  const norm = normalizeText(raw).toUpperCase()
+
+  // 1. Açılar: <sayı>º veya <sayı> DERECE → açı listesi (çaptan dışlanacak).
+  //    º harf-olmayan bir sembol; \b ondan sonra eşleşmediği için ayrı ele alınır.
+  const angles: string[] = []
+  for (const m of norm.matchAll(/(\d+)\s*º/g)) angles.push(m[1])
+  for (const m of norm.matchAll(/(\d+)\s*DERECE\b/g)) angles.push(m[1])
+  const angleSet = new Set(angles)
+
+  const diameters: string[] = []
+  let reductionPattern: string | undefined
+
+  // 2. Redüksiyon: A*B / AxB / A-B (D-prefix opsiyonel, * veya x veya / ayırıcı) → her iki çap
+  //    Örn "D110*D90", "75-63", "110x90", "180/200-63" (ilk iki sayı)
+  const redM = norm.match(/D?(\d+)\s*[*x/×-]\s*D?(\d+)/i)
+  if (redM && !angleSet.has(redM[1]) && !angleSet.has(redM[2])) {
+    diameters.push(redM[1], redM[2])
+    reductionPattern = `${redM[1]}x${redM[2]}`
+  }
+
+  // 3. D-prefix çaplar: D50, D110
+  for (const m of norm.matchAll(/\bD(\d+)\b/g)) {
+    if (!angleSet.has(m[1]) && !diameters.includes(m[1])) diameters.push(m[1])
+  }
+
+  // 4. MM-suffix çaplar: 355MM, 63 MM
+  for (const m of norm.matchAll(/(\d+)\s*MM\b/g)) {
+    if (!angleSet.has(m[1]) && !diameters.includes(m[1])) diameters.push(m[1])
+  }
+
+  // 5. Hâlâ çap yoksa: açı/basınç olmayan en büyük makul sayı
+  if (diameters.length === 0) {
+    const tokens = norm.split(/\s+/)
+    const candidates: number[] = []
+    for (const m of norm.matchAll(/\b(\d+)\b/g)) {
+      const n = m[1]
+      if (angleSet.has(n)) continue
+      // PN16/SDR11 gibi basınç token'larının parçası mı? (komşu token kontrolü)
+      const inPressure = tokens.some(t => PRESSURE_RE.test(t) && t.replace(/\D/g, '') === n)
+      if (inPressure) continue
+      const num = parseInt(n, 10)
+      // çok küçük serbest sayılar (ör. miktar "10 adet") çap olmayabilir; yine de aday say
+      candidates.push(num)
+    }
+    if (candidates.length > 0) {
+      diameters.push(String(Math.max(...candidates)))
+    }
+  }
+
+  return {
+    diameters,
+    angles,
+    primaryDiameter: diameters[0],
+    reductionPattern,
+  }
+}
+
+// Ürünün search_text'inde verilen çapın geçip geçmediğini kontrol eder.
+// Word-boundary + mm-toleranslı: "355" → "355MM"/"355mm"/"355 MM" eşleşir, "1355" eşleşmez.
+function productHasDiameter(searchText: string, dia: string): boolean {
+  const re = new RegExp(`(^|[^0-9])${dia}(\\s*MM)?([^0-9]|$)`, 'i')
+  return re.test(searchText)
+}
+
+// Talep/ürün metninden kanonik yapısal tipleri çıkarır (PRODUCT_TYPE_TERMS üzerinden).
+function getCanonicalTypes(text: string): Set<string> {
+  const upper = text.toUpperCase()
+  const found = new Set<string>()
+  for (const [canonical, variants] of Object.entries(PRODUCT_TYPE_TERMS)) {
+    if (variants.some(v => upper.includes(v))) found.add(canonical)
+  }
+  return found
+}
+
+// Bir tip keyword'ü (ör. ASCII "DIRSEK") metinde varyantlarıyla birlikte arar.
+// Türkçe İ/I sorunu: talep "DIRSEK" (ASCII) gelir ama katalog "DİRSEK" (Türkçe) saklar;
+// kw'nin kanonik grubundaki TÜM varyantları kontrol ederek eşleşmeyi yakalar.
+function typeKeywordInText(text: string, kw: string): boolean {
+  for (const variants of Object.values(PRODUCT_TYPE_TERMS)) {
+    if (variants.includes(kw)) return variants.some(v => text.includes(v))
+  }
+  return text.includes(kw)
+}
 
 interface ParsedRequest {
   originalRequest: string
+  normalizedRequest: string // normalizeText uygulanmış ham ifade (FTS için)
   productCode?: string      // Tespit edilen ürün kodu
   numbers: string[]         // Çıkarılan sayılar (örn: ["63", "50"])
   keywords: string[]        // Temizlenmiş kelimeler
-  measurementPattern?: string  // Örn: "63-50"
+  productTypeKeywords: string[]  // Ürün tipini belirleyen kelimeler (yüksek ağırlık)
+  materialKeywords: string[]     // Malzeme terimleri (orta ağırlık)
+  diameters: string[]       // Tespit edilen çaplar (açılar hariç)
+  angles: string[]          // Açılar (90º, 45º) — çap değil
+  primaryDiameter?: string  // Ankraj için birincil çap
+  reductionPattern?: string // Yalnız gerçek AxB redüksiyon (örn "110x90"), asla açı+çap
 }
 
 interface MatchResult {
@@ -30,46 +182,62 @@ interface MatchResult {
 // Parsing: Müşteri talebini analiz et
 function parseCustomerRequest(request: string): ParsedRequest {
   const originalRequest = request
-  const normalized = request.toUpperCase().trim()
+  const normalizedRequest = normalizeText(request)
+  const normalized = normalizedRequest.toUpperCase()
 
   // 1. Sayıları çıkar (63, 50, 125, vs)
   const numberMatches = request.match(/\d+/g) || []
   const numbers = numberMatches.map(n => n.trim())
 
-  // 2. Ürün kodu tespiti (NTG EF 63-50 gibi)
-  // Ürün kodu pattern: Harfler + sayılar + tire kombinasyonu
-  const codePattern = /[A-Z]{2,}\s*[A-Z]{0,}\s*\d+[-\s]\d+/i
-  const codeMatch = normalized.match(codePattern)
-  const productCode = codeMatch ? codeMatch[0].replace(/\s+/g, ' ').trim() : undefined
+  // 2. Ürün kodu tespiti — yalnızca HARF içeren kod desenleri (NTG-EF-63 gibi).
+  //    Baştaki müşteri katalog kodu ("001 117 0021 0050") ürün kodu DEĞİL — katalog
+  //    product_code ile eşleşmiyor (kanıtlandı), o yüzden saf-rakam dizilerini kod sayma.
+  const codeMatches = normalized.match(/\b[A-Z]{2,}(?:[-][A-Z0-9]+)+\b/g)
+  const productCode = codeMatches?.[0]
 
-  // 3. Ölçü pattern'i bul (63-50, 125-40 gibi)
-  let measurementPattern: string | undefined
-  if (numbers.length >= 2) {
-    // İlk iki sayıyı birleştir
-    measurementPattern = `${numbers[0]}-${numbers[1]}`
-  }
+  // 3. Çap/açı tespiti — açıları (90º) çaptan ayır, "90-355" gibi sahte pattern ÜRETME.
+  const { diameters, angles, primaryDiameter, reductionPattern } = extractDimensions(request)
 
   // 4. Anahtar kelimeleri çıkar (stop words hariç, sayılar hariç)
-  const stopWords = ['bir', 've', 'ile', 'için', 'adet', 'metre', 'kg']
+  const stopWords = ['BIR', 'VE', 'ILE', 'ICIN', 'ADET', 'METRE', 'KG', 'MM', 'CM', 'LIK']
   const words = normalized
     .replace(/[^\w\sğüşıöçĞÜŞİÖÇ]/g, ' ')
     .split(/\s+/)
-    .filter(w => w.length > 0 && !stopWords.includes(w.toLowerCase())) // Sayıları dahil et (ölçüler kritik!)
+    .filter(w => w.length > 0 && !stopWords.includes(w.toUpperCase()))
 
   const keywords = [...new Set(words)] // Unique keywords
 
+  // 5. Kelimeleri ağırlık kategorilerine ayır
+  const productTypeKeywords: string[] = []
+  const materialKeywords: string[] = []
+
+  for (const kw of keywords) {
+    const upper = kw.toUpperCase()
+    if (ALL_TYPE_TERMS.has(upper)) {
+      productTypeKeywords.push(upper)
+    } else if (MATERIAL_TERMS.has(upper)) {
+      materialKeywords.push(upper)
+    }
+  }
+
   return {
     originalRequest,
+    normalizedRequest,
     productCode,
     numbers,
     keywords,
-    measurementPattern
+    productTypeKeywords,
+    materialKeywords,
+    diameters,
+    angles,
+    primaryDiameter,
+    reductionPattern
   }
 }
 
-// Strategy 1: Exact Match (ürün kodu tam eşleşme)
+// Strategy 1: Exact Match (ürün kodu tam eşleşme veya çap+tip ile tek aday)
 async function exactMatch(supabase: any, parsed: ParsedRequest): Promise<MatchResult | null> {
-  if (!parsed.productCode && parsed.numbers.length < 2) {
+  if (!parsed.productCode && !parsed.primaryDiameter) {
     return null
   }
 
@@ -77,52 +245,79 @@ async function exactMatch(supabase: any, parsed: ParsedRequest): Promise<MatchRe
 
   // Ürün kodu varsa direkt ara
   if (parsed.productCode) {
-    const { data, error } = await supabase
+    console.log('🎯 Exact match: Searching for product code', parsed.productCode)
+
+    // Önce birebir eşleşme dene (wildcard yok = case-insensitive exact match)
+    // Bu "NTG-EF-63-50" aramasının "NTG-EF-63" ürününü döndürmesini önler
+    const { data: exactData } = await supabase
       .from('products')
       .select('*')
-      .or(`product_code.ilike.%${parsed.productCode}%,search_text.ilike.%${parsed.productCode}%`)
+      .ilike('product_code', parsed.productCode)
       .limit(1)
 
-    if (data && data.length > 0) {
+    if (exactData && exactData.length > 0) {
+      console.log('🎯 Exact code match (strict):', exactData[0].product_code)
       return {
-        product_id: data[0].id,
-        product: data[0],
+        product_id: exactData[0].id,
+        product: exactData[0],
         confidence: 1.0,
         strategy: 'exact',
-        reasoning: `Ürün kodu tam eşleşme: ${parsed.productCode}`,
+        reasoning: `Ürün kodu birebir eşleşme: ${parsed.productCode}`,
         execution_time: Date.now() - startTime
       }
     }
-  }
 
-  // Ölçü pattern'i varsa (63-50 gibi)
-  // NOT: Birden fazla ürün varsa limit'i artır (multi-match için)
-  if (parsed.measurementPattern) {
-    console.log('🎯 Exact match: Searching for pattern', parsed.measurementPattern)
-    const { data, error } = await supabase
+    // Birebir bulunamadı — substring ile dene (örn: OCR'ın kodu kısaltmış olabileceği durum)
+    const { data: partialData } = await supabase
       .from('products')
       .select('*')
-      .ilike('search_text', `%${parsed.measurementPattern}%`)
-      .limit(100)
+      .or(`product_code.ilike.%${parsed.productCode}%,search_text.ilike.%${parsed.productCode}%`)
+      .limit(5)
 
-    console.log('🎯 Exact match results:', data?.length || 0, 'products found')
+    if (partialData && partialData.length === 1) {
+      console.log('🎯 Exact code match (partial, single result):', partialData[0].product_code)
+      return {
+        product_id: partialData[0].id,
+        product: partialData[0],
+        confidence: 0.95,
+        strategy: 'exact',
+        reasoning: `Ürün kodu kısmi eşleşme: ${parsed.productCode}`,
+        execution_time: Date.now() - startTime
+      }
+    }
+
+    console.log('🎯 Product code not found in DB:', parsed.productCode, '— falling to FTS')
+  }
+
+  // Çap varsa: çapa ankrajlı ara, gate'lerden geçen TEK ürün kalırsa exact döndür.
+  // (Eski "measurementPattern '90-355'" mantığı kaldırıldı — sahte pattern üretiyordu.)
+  if (parsed.primaryDiameter) {
+    console.log('🎯 Exact match: Searching by diameter', parsed.primaryDiameter)
+    const { data } = await supabase
+      .from('products')
+      .select('*')
+      .ilike('search_text', `%${parsed.primaryDiameter}%`)
+      .limit(500)
+
     if (data && data.length > 0) {
-      // Eğer tek ürün varsa direkt döndür
-      if (data.length === 1) {
-        console.log('🎯 Exact match: Single product, returning immediately')
+      // Çap + tip gate'lerinden geçenleri ele al (yanlış-çap/yanlış-tip elenir)
+      const gated = data.filter((p: any) => {
+        const { rejected } = calculateWeightedScore(p, parsed)
+        return !rejected && productHasDiameter((p.search_text || '').toUpperCase(), parsed.primaryDiameter!)
+      })
+      console.log('🎯 Exact match: diameter pool', data.length, '→ gated', gated.length)
+      if (gated.length === 1) {
         return {
-          product_id: data[0].id,
-          product: data[0],
+          product_id: gated[0].id,
+          product: gated[0],
           confidence: 0.95,
           strategy: 'exact',
-          reasoning: `Ölçü pattern eşleşme: ${parsed.measurementPattern}`,
+          reasoning: `Çap + tip birebir eşleşme: ${parsed.primaryDiameter}`,
           execution_time: Date.now() - startTime
         }
       }
-
-      // Birden fazla ürün varsa null döndür (full-text search devam etsin)
-      // Full-text search birden fazla seçenek döndürecek
-      console.log('🎯 Exact match: Multiple products found, passing to full-text search')
+      // Birden fazla aday → full-text search skorlasın/multi-match yapsın
+      console.log('🎯 Exact match: Multiple gated candidates, passing to full-text')
       return null
     }
   }
@@ -130,196 +325,193 @@ async function exactMatch(supabase: any, parsed: ParsedRequest): Promise<MatchRe
   return null
 }
 
-// Strategy 2: Full-Text Search (PostgreSQL tsvector)
+// Ağırlıklı skor hesaplama — ürün tipi kelimeleri 3x, malzeme 2x, diğer 1x.
+// Hard reject: çap tutmuyorsa veya yapısal tip zıtsa aday tamamen elenir (rejected:true).
+function calculateWeightedScore(product: any, parsed: ParsedRequest): { score: number, matchDetail: string, rejected: boolean } {
+  const searchText = (product.search_text || "").toUpperCase()
+  const productType = (product.product_type || "").toUpperCase()
+
+  // --- HARD GATE 1: Çap eşleşmesi zorunlu ---
+  // Talep bir çap belirtiyorsa, ürün o çapı içermiyorsa aday elenir.
+  if (parsed.primaryDiameter && !productHasDiameter(searchText, parsed.primaryDiameter)) {
+    return { score: 0, matchDetail: `diameter-miss:${parsed.primaryDiameter}`, rejected: true }
+  }
+
+  // --- HARD GATE 2: Zıt yapısal tip ---
+  // Talep tipleri ile ürün tipleri INCOMPATIBLE_TYPES'a göre zıt kategorideyse aday elenir.
+  // Compound korumalı: talebin tipi ürünün tiplerinden BİRİNDE varsa çatışma yok.
+  const reqTypes = getCanonicalTypes(parsed.productTypeKeywords.join(' '))
+  if (reqTypes.size > 0) {
+    const prodTypes = getCanonicalTypes(productType)
+    // Talep tiplerinden hiçbiri üründe yoksa VE zıt bir kategori varsa reddet
+    const reqInProd = [...reqTypes].some(t => prodTypes.has(t))
+    if (!reqInProd) {
+      for (const rt of reqTypes) {
+        const incompatible = INCOMPATIBLE_TYPES[rt] || []
+        const prodHasIncompatible = [...prodTypes].some(pt => incompatible.includes(pt))
+        // simetrik kontrol: ürün BORU iken talep bağlantı parçası ise de reddet
+        const reverseIncompatible = [...prodTypes].some(pt => (INCOMPATIBLE_TYPES[pt] || []).includes(rt))
+        if (prodHasIncompatible || reverseIncompatible) {
+          return { score: 0, matchDetail: `type-mismatch:${rt}≠${[...prodTypes].join('/')}`, rejected: true }
+        }
+      }
+    }
+  }
+
+  let weightedHits = 0
+  let totalWeight = 0
+  const matchedParts: string[] = []
+
+  // Ürün tipi kelimeleri — ağırlık 3.0 (varyant-aware: ASCII "DIRSEK" ↔ Türkçe "DİRSEK")
+  for (const kw of parsed.productTypeKeywords) {
+    totalWeight += 3.0
+    if (typeKeywordInText(searchText, kw) || typeKeywordInText(productType, kw)) {
+      weightedHits += 3.0
+      matchedParts.push(`tip:${kw}`)
+    }
+  }
+
+  // Malzeme kelimeleri — ağırlık 2.0
+  for (const kw of parsed.materialKeywords) {
+    totalWeight += 2.0
+    if (searchText.includes(kw)) {
+      weightedHits += 2.0
+      matchedParts.push(`malzeme:${kw}`)
+    }
+  }
+
+  // Diğer kelimeler (sayılar dahil) — ağırlık 1.0
+  for (const kw of parsed.keywords) {
+    const upper = kw.toUpperCase()
+    if (ALL_TYPE_TERMS.has(upper) || MATERIAL_TERMS.has(upper)) continue // zaten sayıldı
+    totalWeight += 1.0
+    if (searchText.includes(upper)) {
+      weightedHits += 1.0
+      matchedParts.push(kw)
+    }
+  }
+
+  // Ürün tipi sözlük bonus: product_type alanında ürün tipi terimi geçiyorsa +0.15
+  let typeBonus = 0
+  for (const [canonical, variants] of Object.entries(PRODUCT_TYPE_TERMS)) {
+    const requestHasTerm = parsed.productTypeKeywords.some(kw => variants.includes(kw))
+    const productHasTerm = variants.some(v => productType.includes(v))
+    if (requestHasTerm && productHasTerm) {
+      typeBonus = 0.15
+      matchedParts.push(`bonus:${canonical}`)
+      break
+    }
+  }
+
+  const ratio = totalWeight > 0 ? weightedHits / totalWeight : 0
+  return {
+    score: ratio + typeBonus,
+    matchDetail: matchedParts.join(', '),
+    rejected: false
+  }
+}
+
+// Bir aday listesini calculateWeightedScore ile skorlar, rejected (çap/tip gate) olanları atar.
+// confidence = clamp(base + ratio*span + typeBonus). Çap eşleşmesine küçük ek bonus.
+function scoreAndGate(
+  products: any[],
+  parsed: ParsedRequest,
+  base: number,
+  span: number,
+  cap: number,
+  label: string,
+  startTime: number
+): MatchResult[] {
+  const out: MatchResult[] = []
+  for (const product of products) {
+    const { score: ratio, matchDetail, rejected } = calculateWeightedScore(product, parsed)
+    if (rejected) continue // çap/tip gate — yanlış-çap/yanlış-tip aday tamamen elenir
+    let confidence = base + ratio * span
+    // Çap doğrulandıysa küçük ek güven (gate zaten geçildi)
+    if (parsed.primaryDiameter && productHasDiameter((product.search_text || '').toUpperCase(), parsed.primaryDiameter)) {
+      confidence += 0.05
+    }
+    confidence = Math.min(confidence, cap)
+    out.push({
+      product_id: product.id,
+      product,
+      confidence,
+      strategy: 'fulltext',
+      reasoning: `${label}: ${matchDetail}`,
+      execution_time: Date.now() - startTime,
+    })
+  }
+  return out.sort((a, b) => b.confidence - a.confidence)
+}
+
+// Strategy 2: Full-Text Search (PostgreSQL tsvector). Ham ifadeyle tsquery kurar
+// (lexeme bozulmasını önler), her katmanda calculateWeightedScore ile skorlar + gate'ler.
 async function fullTextSearch(supabase: any, parsed: ParsedRequest): Promise<MatchResult[]> {
   const startTime = Date.now()
 
-  // Eğer measurement pattern varsa ama keywords yoksa, direkt pattern ile ara
-  if (parsed.measurementPattern && parsed.keywords.length === 0) {
-    console.log('📊 Full-text: Pattern-only search for', parsed.measurementPattern)
-    const { data, error } = await supabase
-      .from('products')
-      .select('*')
-      .ilike('search_text', `%${parsed.measurementPattern}%`)
-      .limit(100)
-
-    console.log('📊 Full-text pattern results:', data?.length || 0, 'products')
-    if (data && data.length > 0) {
-      const scored = data.map((product: any) => ({
-        product_id: product.id,
-        product,
-        confidence: 0.9, // Yüksek confidence çünkü pattern tam eşleşiyor
-        strategy: 'fulltext' as const,
-        reasoning: `Pattern eşleşme: ${parsed.measurementPattern}`,
-        execution_time: Date.now() - startTime
-      }))
-      return scored
-    }
-  }
-
-  // YENI: Eğer measurement pattern varsa VE keywords varsa, pattern + keyword araması yap
-  if (parsed.measurementPattern && parsed.keywords.length > 0) {
-    console.log('📊 Full-text: Pattern + keywords search for', parsed.measurementPattern, 'with keywords', parsed.keywords)
-    const { data, error } = await supabase
-      .from('products')
-      .select('*')
-      .ilike('search_text', `%${parsed.measurementPattern}%`)
-      .limit(100)
-
-    console.log('📊 Full-text pattern+keywords results:', data?.length || 0, 'products')
-    if (data && data.length > 0) {
-      const scored = data.map((product: any) => {
-        let score = 0.7 // Base score for pattern match
-
-        // Ölçü pattern tam eşleşmesi
-        if (product.search_text.includes(parsed.measurementPattern)) {
-          score += 0.2
-        }
-
-        // Anahtar kelime eşleşmesi
-        const matchedKeywords = parsed.keywords.filter(kw =>
-          product.search_text.toLowerCase().includes(kw.toLowerCase())
-        )
-        score += (matchedKeywords.length / parsed.keywords.length) * 0.1
-
-        return {
-          product_id: product.id,
-          product,
-          confidence: Math.min(score, 1.0),
-          strategy: 'fulltext' as const,
-          reasoning: `Pattern + ${matchedKeywords.length}/${parsed.keywords.length} kelime eşleşmesi`,
-          execution_time: Date.now() - startTime
-        }
-      })
-
-      // Confidence'a göre sırala
-      return scored.sort((a, b) => b.confidence - a.confidence)
-    }
-  }
-
-  // Anahtar kelimelerden tsquery oluştur
-  const tsqueryAnd = parsed.keywords.join(' & ')
-
-  if (!tsqueryAnd) {
-    console.log('📊 Full-text: No keywords, returning empty')
-    return []
-  }
-
-  // 2a. AND araması: tüm kelimelerin eşleşmesi gerekir (yüksek güven)
-  console.log('📊 Full-text: tsvector AND search with tsquery:', tsqueryAnd)
+  // 2a. AND araması: HAM normalize ifadeyle plainto_tsquery (turkish).
+  //     Elle tokenize (355MM→355, 90º→90) lexeme'leri bozuyordu; ham ifade lexeme'leri
+  //     (355mm, 90º) korur → doğru eşleşme bulunur.
+  console.log('📊 Full-text AND (raw plainto):', parsed.normalizedRequest)
   const { data: andData, error: andError } = await supabase
     .from('products')
     .select('*')
-    .textSearch('search_vector', tsqueryAnd, {
+    .textSearch('search_vector', parsed.normalizedRequest, {
       type: 'plain',
       config: 'turkish'
     })
-    .limit(100)
+    .limit(500)
 
-  console.log('📊 Full-text AND results:', andData?.length || 0, 'products', andError ? `ERROR: ${andError.message}` : '')
+  console.log('📊 AND results:', andData?.length || 0, andError ? `ERROR: ${andError.message}` : '')
 
   if (andData && andData.length > 0) {
-    const scored = andData.map((product: any) => {
-      let score = 0.7 // AND match için yüksek base score
-
-      if (parsed.numbers.length > 0) {
-        const productNumbers = (product.search_text || '').match(/\d+/g) || []
-        parsed.numbers.forEach(num => {
-          if (productNumbers.includes(num)) score += 0.1
-        })
-        if (parsed.measurementPattern && product.search_text.includes(parsed.measurementPattern)) {
-          score += 0.15
-        }
-      }
-
-      const matchedKeywords = parsed.keywords.filter(kw =>
-        product.search_text.toLowerCase().includes(kw.toLowerCase())
-      )
-      score += (matchedKeywords.length / parsed.keywords.length) * 0.05
-
-      return {
-        product_id: product.id,
-        product,
-        confidence: Math.min(score, 1.0),
-        strategy: 'fulltext' as const,
-        reasoning: `AND full-text: ${matchedKeywords.length} kelime eşleşti`,
-        execution_time: Date.now() - startTime
-      }
-    })
-
-    return scored.sort((a, b) => b.confidence - a.confidence)
+    const scored = scoreAndGate(andData, parsed, 0.6, 0.35, 0.97, 'AND full-text', startTime)
+    if (scored.length > 0) return scored
+    console.log('📊 AND: tüm adaylar gate ile elendi, OR/çap fallback denenecek')
   }
 
-  // 2b. OR fallback: en az bir kelime eşleşmeli (orta güven)
-  const tsqueryOr = parsed.keywords.join(' | ')
-  console.log('📊 Full-text: AND returned nothing, trying OR search:', tsqueryOr)
-  const { data: orData, error: orError } = await supabase
-    .from('products')
-    .select('*')
-    .textSearch('search_vector', tsqueryOr, {
-      type: 'plain',
-      config: 'turkish'
-    })
-    .limit(100)
-
-  console.log('📊 Full-text OR results:', orData?.length || 0, 'products', orError ? `ERROR: ${orError.message}` : '')
-
-  if (orData && orData.length > 0) {
-    const scored = orData.map((product: any) => {
-      const matchedKeywords = parsed.keywords.filter(kw =>
-        product.search_text.toLowerCase().includes(kw.toLowerCase())
-      )
-      const matchRatio = parsed.keywords.length > 0
-        ? matchedKeywords.length / parsed.keywords.length
-        : 0
-      return {
-        product_id: product.id,
-        product,
-        confidence: Math.min(0.5 + matchRatio * 0.2, 0.7), // 0.5–0.7 arası
-        strategy: 'fulltext' as const,
-        reasoning: `OR full-text: ${matchedKeywords.length}/${parsed.keywords.length} kelime eşleşti`,
-        execution_time: Date.now() - startTime
+  // 2b. Çap-ankrajlı fallback: çap varsa, o çaptaki ürünleri çek + tip keyword ile daralt,
+  //     skorla + gate. Bu, AND'in OCR gürültüsünde kaçırdığı doğru ürünü kurtarır.
+  if (parsed.primaryDiameter) {
+    console.log('📊 Diameter-anchored fallback:', parsed.primaryDiameter)
+    let q = supabase.from('products').select('*').ilike('search_text', `%${parsed.primaryDiameter}%`)
+    // Tip keyword varsa havuzu daralt — varyant-aware (ASCII "DIRSEK" + Türkçe "DİRSEK" birlikte).
+    if (parsed.productTypeKeywords.length > 0) {
+      const kw = parsed.productTypeKeywords[0]
+      let variants = [kw]
+      for (const vs of Object.values(PRODUCT_TYPE_TERMS)) {
+        if (vs.includes(kw)) { variants = vs; break }
       }
-    })
-    return scored.sort((a, b) => b.confidence - a.confidence)
-  }
-
-  // 2c. ilike fallback: product_type üzerinde doğrudan metin araması (düşük güven)
-  console.log('📊 Full-text: FTS returned nothing, trying ilike fallback on product_type')
-  const ilikeResults: any[] = []
-  const seenIds = new Set<string>()
-
-  for (const keyword of parsed.keywords) {
-    if (keyword.length < 2) continue
-    const { data: ilikeData } = await supabase
-      .from('products')
-      .select('*')
-      .ilike('product_type', `%${keyword}%`)
-      .limit(30)
-
-    if (ilikeData) {
-      for (const product of ilikeData) {
-        if (!seenIds.has(product.id)) {
-          seenIds.add(product.id)
-          ilikeResults.push(product)
-        }
-      }
+      const orExpr = variants.map(v => `search_text.ilike.%${v}%`).join(',')
+      q = q.or(orExpr)
+    }
+    const { data: diaData } = await q.limit(500)
+    console.log('📊 Diameter pool:', diaData?.length || 0)
+    if (diaData && diaData.length > 0) {
+      const scored = scoreAndGate(diaData, parsed, 0.4, 0.45, 0.9, 'Çap-ankrajlı', startTime)
+      if (scored.length > 0) return scored
     }
   }
 
-  console.log('📊 Full-text ilike results:', ilikeResults.length, 'products')
-
-  if (ilikeResults.length > 0) {
-    return ilikeResults.map((product: any) => ({
-      product_id: product.id,
-      product,
-      confidence: 0.4,
-      strategy: 'fulltext' as const,
-      reasoning: `ilike fallback on product_type`,
-      execution_time: Date.now() - startTime
-    }))
+  // 2c. OR fallback: tsvector OR (en az bir kelime), skorla + gate. Düşük taban güven.
+  const tsqueryOr = parsed.keywords.filter(k => k.length >= 2).join(' | ')
+  if (tsqueryOr) {
+    console.log('📊 OR fallback:', tsqueryOr)
+    const { data: orData } = await supabase
+      .from('products')
+      .select('*')
+      .textSearch('search_vector', tsqueryOr, { type: 'plain', config: 'turkish' })
+      .limit(500)
+    console.log('📊 OR results:', orData?.length || 0)
+    if (orData && orData.length > 0) {
+      const scored = scoreAndGate(orData, parsed, 0.35, 0.35, 0.75, 'OR full-text', startTime)
+      if (scored.length > 0) return scored
+    }
   }
 
+  // Hiçbir gate'li aday yok → boş döndür (yanlış eşleşme yerine "bulunamadı").
+  // (Eski sabit-0.4 ilike fallback KALDIRILDI — çöp eşleşmelerin kaynağıydı.)
+  console.log('📊 Full-text: gate sonrası aday yok → boş')
   return []
 }
 
@@ -447,21 +639,35 @@ serve(async (req) => {
       )
     }
 
+    // Service role: this function runs server-side only and must keep reading
+    // products after the RLS cleanup migration removes the legacy anon-read
+    // policies. SUPABASE_SERVICE_ROLE_KEY is auto-injected into edge functions;
+    // anon key remains as a fallback for local serving without secrets.
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? ''
     )
 
     const totalStartTime = Date.now()
 
     // 1. Talebi parse et
     const parsed = parseCustomerRequest(customerRequest)
-    console.log('Parsed request:', parsed)
+    console.log('📋 [DIAG] Input:', customerRequest)
+    console.log('📋 [DIAG] Parsed:', JSON.stringify({
+      productCode: parsed.productCode,
+      diameters: parsed.diameters,
+      angles: parsed.angles,
+      primaryDiameter: parsed.primaryDiameter,
+      reductionPattern: parsed.reductionPattern,
+      productTypeKeywords: parsed.productTypeKeywords,
+      materialKeywords: parsed.materialKeywords,
+      keywordCount: parsed.keywords.length
+    }))
 
     // 2. Strategy 1: Exact Match
     const exactResult = await exactMatch(supabase, parsed)
     if (exactResult && exactResult.confidence >= 0.9) {
-      console.log('✓ Exact match found:', exactResult.product.product_code)
+      console.log('📋 [DIAG] Result: exact-match →', exactResult.product.product_code, 'confidence:', exactResult.confidence)
       await logAnalytics(supabase, customerRequest, exactResult)
 
       return new Response(
@@ -475,29 +681,33 @@ serve(async (req) => {
       )
     }
 
-    // 3. Strategy 2: Full-Text Search
-    const ftResults = await fullTextSearch(supabase, parsed)
-    if (ftResults.length > 0 && ftResults[0].confidence >= 0.7) {
-      console.log('✓ Full-text match found:', ftResults[0].product.product_code, ftResults[0].confidence)
+    // 3. Strategy 2: Full-Text Search — sonuçlar zaten skorlu + gate'li (rejected elenmiş).
+    //    Backend eşiği uygula: MIN_CONFIDENCE altı asla UI'ya gitmez.
+    const ftAll = await fullTextSearch(supabase, parsed)
+    const ftResults = ftAll.filter(r => r.confidence >= MIN_CONFIDENCE)
 
-      // Multi-match kontrol: Eğer birden fazla ürün benzer confidence'a sahipse hepsini döndür
+    console.log('📋 [DIAG] FT:', ftAll.length, 'aday →', ftResults.length, '≥MIN |',
+      ftResults.slice(0, 3).map(r => `${r.product.product_code}=${r.confidence.toFixed(3)}`).join(', '))
+
+    if (ftResults.length > 0) {
       const topConfidence = ftResults[0].confidence
-      const similarResults = ftResults.filter(r =>
-        Math.abs(r.confidence - topConfidence) < 0.1 // %10'dan az fark varsa benzer sayılır
-      )
+      const similarResults = ftResults.filter(r => Math.abs(r.confidence - topConfidence) < 0.1)
 
-      // Eğer 2+ benzer sonuç varsa, kullanıcıya seçim yaptır
-      const isMultiMatch = similarResults.length >= 2
+      // Yüksek güven (≥0.7): tek güçlü eşleşme veya benzer-güçlü multi-match.
+      // Orta güven [MIN,0.7): "makul ama kesin değil" → daima multi-match (kullanıcı seçsin).
+      const isHigh = topConfidence >= 0.7
+      const isMultiMatch = !isHigh || similarResults.length >= 2
+      const matched = isMultiMatch ? similarResults : ftResults
 
       await logAnalytics(supabase, customerRequest, ftResults[0])
 
       return new Response(
         JSON.stringify({
-          matched: isMultiMatch ? similarResults : ftResults,
+          matched,
           method: 'fulltext-search',
-          isMultiMatch, // Frontend için flag
+          isMultiMatch,
           multiMatchMessage: isMultiMatch
-            ? `${similarResults.length} benzer ürün bulundu. Lütfen uygun olanı seçin:`
+            ? `${matched.length} olası ürün bulundu. Lütfen uygun olanı seçin:`
             : null,
           totalTime: Date.now() - totalStartTime,
           parsed
@@ -506,18 +716,20 @@ serve(async (req) => {
       )
     }
 
-    // 4. Strategy 3: AI Fallback (OpenAI)
+    // 4. Strategy 3: AI Fallback — yalnız gate'li adaylarla (ftAll, eşik-altı dahil ama rejected hariç).
+    //    Aday yoksa AI'ı atla (random-ilk-ürün önyargısını önle).
     const openAiApiKey = Deno.env.get('OPENAI_API_KEY')
+    const candidates = ftAll.map(r => r.product)
 
-    if (!openAiApiKey) {
-      console.log('⚠ No OpenAI key, returning full-text results')
-      await logAnalytics(supabase, customerRequest, ftResults[0] || null)
-
+    if (!openAiApiKey || candidates.length === 0) {
+      if (!openAiApiKey) console.log('⚠ No OpenAI key; eşik-altı sonuç dönmez → no-match')
+      else console.log('⚠ Gate sonrası aday yok → no-match')
+      await logAnalytics(supabase, customerRequest, null)
       return new Response(
         JSON.stringify({
-          matched: ftResults,
-          method: 'fulltext-fallback',
-          message: 'OpenAI not available, using full-text results',
+          matched: [],
+          method: 'no-match',
+          message: 'Ürün bulunamadı',
           totalTime: Date.now() - totalStartTime,
           parsed
         }),
@@ -525,32 +737,26 @@ serve(async (req) => {
       )
     }
 
-    // AI ile eşleştir (sadece top 10 ürünle)
-    // Eğer full-text sonuç bulamazsa, tüm ürünlerden random 100 tanesini al
-    let candidates = ftResults.map(r => r.product)
-    if (candidates.length === 0) {
-      console.log('⚠ No full-text results, fetching random products for AI')
-      const { data: randomProducts } = await supabase
-        .from('products')
-        .select('*')
-        .limit(100)
-      candidates = randomProducts || []
-    }
     const aiResult = await aiMatch(openAiApiKey, customerRequest, candidates)
 
+    // AI dönüşünü yeniden doğrula: çap gate + MIN_CONFIDENCE (model yanlış-çap seçebilir).
     if (aiResult) {
-      console.log('✓ AI match found:', aiResult.product.product_code, aiResult.confidence)
-      await logAnalytics(supabase, customerRequest, aiResult)
-
-      return new Response(
-        JSON.stringify({
-          matched: [aiResult],
-          method: 'ai-fallback',
-          totalTime: Date.now() - totalStartTime,
-          parsed
-        }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      const aiSearchText = (aiResult.product.search_text || '').toUpperCase()
+      const diameterOk = !parsed.primaryDiameter || productHasDiameter(aiSearchText, parsed.primaryDiameter)
+      if (diameterOk && aiResult.confidence >= MIN_CONFIDENCE) {
+        console.log('✓ AI match (validated):', aiResult.product.product_code, aiResult.confidence)
+        await logAnalytics(supabase, customerRequest, aiResult)
+        return new Response(
+          JSON.stringify({
+            matched: [aiResult],
+            method: 'ai-fallback',
+            totalTime: Date.now() - totalStartTime,
+            parsed
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      console.log('⚠ AI seçimi gate/eşik geçemedi (çap/min) → no-match:', aiResult.product.product_code)
     }
 
     // 5. Hiçbir eşleşme bulunamadı

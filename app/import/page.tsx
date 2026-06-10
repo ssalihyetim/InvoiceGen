@@ -4,6 +4,7 @@ import { useState } from 'react'
 import * as XLSX from 'xlsx'
 import Papa from 'papaparse'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/lib/auth-context'
 
 type ProductRow = {
   product_type: string
@@ -36,6 +37,7 @@ type ImportHistory = {
 const normalizeKey = (key: string): string => key.toLocaleLowerCase('tr-TR').trim()
 
 export default function ImportPage() {
+  const { tenantId } = useAuth()
   const [file, setFile] = useState<File | null>(null)
   const [sheetNames, setSheetNames] = useState<string[]>([])
   const [selectedSheets, setSelectedSheets] = useState<string[]>([])
@@ -402,7 +404,8 @@ export default function ImportPage() {
         body: JSON.stringify({
           products: allProducts,
           fileName: file.name,
-          fileSize: file.size
+          fileSize: file.size,
+          tenant_id: tenantId,
         }),
       })
 

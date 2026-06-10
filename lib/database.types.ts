@@ -9,9 +9,59 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
+      tenants: {
+        Row: {
+          id: string
+          name: string
+          slug: string
+          settings: Json
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          slug: string
+          settings?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          slug?: string
+          settings?: Json
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      tenant_users: {
+        Row: {
+          id: string
+          tenant_id: string
+          user_id: string
+          role: 'admin' | 'manager' | 'sales' | 'accountant' | 'viewer'
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          tenant_id: string
+          user_id: string
+          role?: 'admin' | 'manager' | 'sales' | 'accountant' | 'viewer'
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          tenant_id?: string
+          user_id?: string
+          role?: 'admin' | 'manager' | 'sales' | 'accountant' | 'viewer'
+          created_at?: string
+        }
+      }
       products: {
         Row: {
           id: string
+          tenant_id: string
           product_type: string
           diameter: string | null
           product_code: string
@@ -24,6 +74,7 @@ export interface Database {
         }
         Insert: {
           id?: string
+          tenant_id?: string
           product_type: string
           diameter?: string | null
           product_code: string
@@ -36,6 +87,7 @@ export interface Database {
         }
         Update: {
           id?: string
+          tenant_id?: string
           product_type?: string
           diameter?: string | null
           product_code?: string
@@ -50,31 +102,37 @@ export interface Database {
       companies: {
         Row: {
           id: string
+          tenant_id: string
           name: string
           email: string | null
           phone: string | null
           address: string | null
           tax_number: string | null
+          created_by: string | null
           created_at: string
           updated_at: string
         }
         Insert: {
           id?: string
+          tenant_id?: string
           name: string
           email?: string | null
           phone?: string | null
           address?: string | null
           tax_number?: string | null
+          created_by?: string | null
           created_at?: string
           updated_at?: string
         }
         Update: {
           id?: string
+          tenant_id?: string
           name?: string
           email?: string | null
           phone?: string | null
           address?: string | null
           tax_number?: string | null
+          created_by?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -82,6 +140,7 @@ export interface Database {
       discount_rules: {
         Row: {
           id: string
+          tenant_id: string
           company_id: string
           product_type: string | null
           discount_percentage: number
@@ -92,6 +151,7 @@ export interface Database {
         }
         Insert: {
           id?: string
+          tenant_id?: string
           company_id: string
           product_type?: string | null
           discount_percentage: number
@@ -102,6 +162,7 @@ export interface Database {
         }
         Update: {
           id?: string
+          tenant_id?: string
           company_id?: string
           product_type?: string | null
           discount_percentage?: number
@@ -114,39 +175,48 @@ export interface Database {
       quotations: {
         Row: {
           id: string
+          tenant_id: string
           company_id: string
           quotation_number: string
-          status: 'draft' | 'sent' | 'approved' | 'rejected'
+          status: 'draft' | 'sent' | 'approved' | 'rejected' | 'expired'
           total_amount: number
           discount_amount: number
           final_amount: number
           notes: string | null
+          valid_until: string | null
+          created_by: string | null
           created_at: string
           updated_at: string
           sent_at: string | null
         }
         Insert: {
           id?: string
+          tenant_id?: string
           company_id: string
           quotation_number: string
-          status?: 'draft' | 'sent' | 'approved' | 'rejected'
+          status?: 'draft' | 'sent' | 'approved' | 'rejected' | 'expired'
           total_amount: number
           discount_amount: number
           final_amount: number
           notes?: string | null
+          valid_until?: string | null
+          created_by?: string | null
           created_at?: string
           updated_at?: string
           sent_at?: string | null
         }
         Update: {
           id?: string
+          tenant_id?: string
           company_id?: string
           quotation_number?: string
-          status?: 'draft' | 'sent' | 'approved' | 'rejected'
+          status?: 'draft' | 'sent' | 'approved' | 'rejected' | 'expired'
           total_amount?: number
           discount_amount?: number
           final_amount?: number
           notes?: string | null
+          valid_until?: string | null
+          created_by?: string | null
           created_at?: string
           updated_at?: string
           sent_at?: string | null
@@ -155,6 +225,7 @@ export interface Database {
       quotation_items: {
         Row: {
           id: string
+          tenant_id: string
           quotation_id: string
           product_id: string
           quantity: number
@@ -169,6 +240,7 @@ export interface Database {
         }
         Insert: {
           id?: string
+          tenant_id?: string
           quotation_id: string
           product_id: string
           quantity: number
@@ -183,6 +255,7 @@ export interface Database {
         }
         Update: {
           id?: string
+          tenant_id?: string
           quotation_id?: string
           product_id?: string
           quantity?: number
@@ -199,6 +272,7 @@ export interface Database {
       import_history: {
         Row: {
           id: string
+          tenant_id: string
           file_name: string
           file_url: string
           total_rows: number
@@ -209,6 +283,7 @@ export interface Database {
         }
         Insert: {
           id?: string
+          tenant_id?: string
           file_name: string
           file_url: string
           total_rows: number
@@ -219,6 +294,7 @@ export interface Database {
         }
         Update: {
           id?: string
+          tenant_id?: string
           file_name?: string
           file_url?: string
           total_rows?: number
@@ -233,7 +309,22 @@ export interface Database {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_tenant_id: {
+        Args: Record<string, never>
+        Returns: string
+      }
+      get_user_role: {
+        Args: Record<string, never>
+        Returns: string
+      }
+      create_tenant_with_admin: {
+        Args: {
+          p_tenant_name: string
+          p_tenant_slug: string
+          p_user_id: string
+        }
+        Returns: string
+      }
     }
     Enums: {
       [_ in never]: never

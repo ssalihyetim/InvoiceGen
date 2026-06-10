@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { getAuthContext, requirePermission } from '@/lib/api-auth'
 
 export async function POST(request: NextRequest) {
+  const auth = await getAuthContext(request)
+  if (auth instanceof NextResponse) return auth
+
+  const denied = requirePermission(auth, 'products', 'delete')
+  if (denied) return denied
+
+  const { supabase, tenantId } = auth
+
   try {
     const body = await request.json()
     const { ids, applyToAll } = body
@@ -11,27 +19,30 @@ export async function POST(request: NextRequest) {
     }
 
     if (applyToAll) {
-      // Null out FK references first to avoid constraint violation
-      await supabase.from('match_analytics').update({ matched_product_id: null }).not('matched_product_id', 'is', null)
-
+      // Tenant filter is defense-in-depth on top of RLS — applyToAll must
+      // never reach beyond the caller's own tenant.
       const { error, count } = await supabase
         .from('products')
         .delete({ count: 'exact' })
-        .not('id', 'is', null)
+        .eq('tenant_id', tenantId)
 
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      if (error) {
+        console.error('bulk-delete-products (applyToAll) error:', error)
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
       return NextResponse.json({ deleted: count || 0, errors: 0 })
     }
-
-    // Null out FK references for these specific products
-    await supabase.from('match_analytics').update({ matched_product_id: null }).in('matched_product_id', ids)
 
     const { error, count } = await supabase
       .from('products')
       .delete({ count: 'exact' })
+      .eq('tenant_id', tenantId)
       .in('id', ids)
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) {
+      console.error('bulk-delete-products error:', error)
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
     return NextResponse.json({ deleted: count || 0, errors: 0 })
   } catch (error: any) {
     console.error('bulk-delete-products error:', error)

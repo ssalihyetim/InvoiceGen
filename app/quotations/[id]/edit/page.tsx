@@ -8,6 +8,7 @@ import ImageUploadTab from '@/components/quotations/ImageUploadTab'
 import ProductSelectionModal from '@/components/quotations/ProductSelectionModal'
 import BatchMultiMatchModal from '@/components/quotations/BatchMultiMatchModal'
 import { generateQuotationPDF } from '@/lib/pdf-generator'
+import { useAuth } from '@/lib/auth-context'
 
 // Supabase Edge Function URL
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -38,6 +39,7 @@ type QuotationItem = {
 }
 
 export default function EditQuotationPage() {
+  const { tenantId } = useAuth()
   const params = useParams()
   const router = useRouter()
   const quotationId = params?.id as string
@@ -271,70 +273,77 @@ export default function EditQuotationPage() {
       let successCount = 0
       let failCount = 0
 
-      // Her satır için AI ile eşleştir
-      for (const row of jsonData) {
-        const talep = row['Müşteri Talebi'] || row['talep'] || ''
-        const miktar = Number(row['Miktar'] || row['miktar'] || 1)
+      // Tüm satırları paralel eşleştir (sıralı await: N satır = N ardışık RTT idi)
+      const rows = jsonData
+        .map(row => ({
+          talep: String(row['Müşteri Talebi'] || row['talep'] || ''),
+          miktar: Number(row['Miktar'] || row['miktar'] || 1),
+        }))
+        .filter(r => r.talep)
 
-        console.log('Processing:', { talep, miktar })
+      const results = await Promise.allSettled(
+        rows.map(({ talep }) =>
+          fetch(MATCH_PRODUCT_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify({ customerRequest: talep })
+          }).then(r => r.json())
+        )
+      )
 
-        if (talep) {
-          try {
-            const response = await fetch(MATCH_PRODUCT_URL, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-              },
-              body: JSON.stringify({ customerRequest: talep })
+      results.forEach((settled, i) => {
+        const { talep, miktar } = rows[i]
+
+        if (settled.status === 'rejected') {
+          console.error('Excel AI matching error for', talep, ':', settled.reason)
+          failCount++
+          return
+        }
+
+        const result = settled.value
+        console.log('AI Result for', talep, ':', result)
+
+        if (result.matched && result.matched.length > 0) {
+          // Multi-match kontrolü
+          if (result.isMultiMatch && result.matched.length > 1) {
+            console.log('Multi-match detected for Excel row:', talep)
+            pendingMultiMatches.push({
+              originalRequest: talep,
+              quantity: miktar,
+              matches: result.matched,
+              selectedIndex: null
             })
+          } else {
+            // Tek ürün varsa direkt ekle
+            const match = result.matched[0]
+            let product = match.product
+            if (!product && match.product_id) {
+              product = products.find(p => p.id === match.product_id)
+            }
 
-            const result = await response.json()
-            console.log('AI Result for', talep, ':', result)
-
-            if (result.matched && result.matched.length > 0) {
-              // Multi-match kontrolü
-              if (result.isMultiMatch && result.matched.length > 1) {
-                console.log('Multi-match detected for Excel row:', talep)
-                pendingMultiMatches.push({
-                  originalRequest: talep,
-                  quantity: miktar,
-                  matches: result.matched,
-                  selectedIndex: null
-                })
-              } else {
-                // Tek ürün varsa direkt ekle
-                const match = result.matched[0]
-                let product = match.product
-                if (!product && match.product_id) {
-                  product = products.find(p => p.id === match.product_id)
-                }
-
-                if (product && match.confidence > 0.3) {
-                  const item: QuotationItem = {
-                    product: product,
-                    quantity: miktar,
-                    discount_percentage: 0,
-                    ai_matched: true,
-                    original_request: talep
-                  }
-                  newItems.push(item)
-                  successCount++
-                } else {
-                  failCount++
-                  console.log('Product not found or low confidence for:', talep)
-                }
+            if (product && match.confidence > 0.3) {
+              const item: QuotationItem = {
+                product: product,
+                quantity: miktar,
+                discount_percentage: 0,
+                ai_matched: true,
+                original_request: talep
               }
+              newItems.push(item)
+              successCount++
             } else {
               failCount++
-              console.log('No match for:', talep)
+              console.log('Product not found or low confidence for:', talep)
             }
-          } catch (err) {
-            console.error('Excel AI matching error for', talep, ':', err)
-            failCount++
           }
+        } else {
+          failCount++
+          console.log('No match for:', talep)
         }
-      }
+      })
 
       // Başarılı eşleşmeleri ekle
       if (newItems.length > 0) {
@@ -373,11 +382,10 @@ export default function EditQuotationPage() {
     let successCount = 0
     let failCount = 0
 
-    for (const request of requests) {
-      console.log('Processing request:', request)
-
-      try {
-        const response = await fetch(MATCH_PRODUCT_URL, {
+    // Tüm talepleri paralel eşleştir (yeni teklif sayfasındaki desenle aynı)
+    const results = await Promise.allSettled(
+      requests.map(request =>
+        fetch(MATCH_PRODUCT_URL, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -385,50 +393,57 @@ export default function EditQuotationPage() {
           },
           body: JSON.stringify({ customerRequest: request.talep })
         })
+          .then(r => r.json())
+          .then(result => ({ request, result }))
+      )
+    )
 
-        const result = await response.json()
-        console.log('AI result for', request.talep, ':', result)
-
-        if (result.matched && result.matched.length > 0) {
-          // Multi-match kontrolü
-          if (result.isMultiMatch && result.matched.length > 1) {
-            console.log('Multi-match detected for image request:', request.talep)
-            pendingMultiMatches.push({
-              originalRequest: request.talep,
-              quantity: request.miktar,
-              matches: result.matched,
-              selectedIndex: null
-            })
-          } else {
-            // Tek ürün varsa direkt ekle
-            const match = result.matched[0]
-            let product = match.product
-            if (!product && match.product_id) {
-              product = products.find(p => p.id === match.product_id)
-            }
-
-            if (product && match.confidence > 0.3) {
-              newItems.push({
-                product,
-                quantity: request.miktar,
-                discount_percentage: 0,
-                ai_matched: true,
-                original_request: request.talep
-              })
-              successCount++
-              console.log('✓ Matched:', product.product_code)
-            } else {
-              failCount++
-              console.log('✗ Low confidence or no product')
-            }
-          }
-        } else {
-          failCount++
-          console.log('✗ No match found')
-        }
-      } catch (err) {
-        console.error('Image OCR AI matching error:', err)
+    for (const settled of results) {
+      if (settled.status === 'rejected') {
+        console.error('Image OCR AI matching error:', settled.reason)
         failCount++
+        continue
+      }
+
+      const { request, result } = settled.value
+      console.log('AI result for', request.talep, ':', result)
+
+      if (result.matched && result.matched.length > 0) {
+        // Multi-match kontrolü
+        if (result.isMultiMatch && result.matched.length > 1) {
+          console.log('Multi-match detected for image request:', request.talep)
+          pendingMultiMatches.push({
+            originalRequest: request.talep,
+            quantity: request.miktar,
+            matches: result.matched,
+            selectedIndex: null
+          })
+        } else {
+          // Tek ürün varsa direkt ekle
+          const match = result.matched[0]
+          let product = match.product
+          if (!product && match.product_id) {
+            product = products.find(p => p.id === match.product_id)
+          }
+
+          if (product && match.confidence > 0.3) {
+            newItems.push({
+              product,
+              quantity: request.miktar,
+              discount_percentage: 0,
+              ai_matched: true,
+              original_request: request.talep
+            })
+            successCount++
+            console.log('✓ Matched:', product.product_code)
+          } else {
+            failCount++
+            console.log('✗ Low confidence or no product')
+          }
+        }
+      } else {
+        failCount++
+        console.log('✗ No match found')
       }
     }
 
@@ -540,6 +555,7 @@ export default function EditQuotationPage() {
       // 3. Insert new quotation_items
       const quotationItems = items.map(item => ({
         quotation_id: quotationId,
+        tenant_id: tenantId,
         product_id: item.product.id,
         quantity: item.quantity,
         unit_price: item.product.base_price,

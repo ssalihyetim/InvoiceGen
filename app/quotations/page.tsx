@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import { generateQuotationPDF } from '@/lib/pdf-generator'
+import { useAuth } from '@/lib/auth-context'
+import { normalizeStatus } from '@/lib/quotation-status'
 
 type Quotation = {
   id: string
@@ -23,16 +25,52 @@ type Quotation = {
   }[]
 }
 
+type Toast = { type: 'success' | 'error'; message: string }
+
+const STATUS_STYLES: Record<string, string> = {
+  draft: 'bg-amber-100 text-amber-700 ring-1 ring-amber-200',
+  sent: 'bg-blue-100 text-blue-700 ring-1 ring-blue-200',
+  approved: 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200',
+  rejected: 'bg-red-100 text-red-700 ring-1 ring-red-200',
+  expired: 'bg-gray-100 text-gray-700 ring-1 ring-gray-200',
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  draft: 'Taslak',
+  sent: 'Gönderildi',
+  approved: 'Onaylandı',
+  rejected: 'Reddedildi',
+  expired: 'Süresi Doldu',
+}
+
+const STATUS_OPTIONS = ['draft', 'sent', 'approved', 'rejected'] as const
+
+function getCurrencySymbol(currency: string) {
+  if (currency === 'TRY' || currency === 'TL') return '₺'
+  if (currency === 'USD') return '$'
+  if (currency === 'EUR') return '€'
+  return currency
+}
+
 export default function QuotationsPage() {
+  const { tenantId } = useAuth()
   const [quotations, setQuotations] = useState<Quotation[]>([])
+  const [loading, setLoading] = useState(true)
   const [loadingPdf, setLoadingPdf] = useState<string | null>(null)
+  const [toast, setToast] = useState<Toast | null>(null)
+
+  const showToast = (type: Toast['type'], message: string) => {
+    setToast({ type, message })
+    setTimeout(() => setToast(null), 4000)
+  }
 
   useEffect(() => {
     loadQuotations()
   }, [])
 
   const loadQuotations = async () => {
-    const { data } = await supabase
+    setLoading(true)
+    const { data, error } = await supabase
       .from('quotations')
       .select(`
         id,
@@ -51,49 +89,47 @@ export default function QuotationsPage() {
       `)
       .order('created_at', { ascending: false })
 
-    if (data) setQuotations(data as any)
+    if (error) {
+      showToast('error', 'Teklifler yüklenirken hata oluştu: ' + error.message)
+    } else if (data) {
+      setQuotations(data as any)
+    }
+    setLoading(false)
+  }
+
+  const calculateTotalsByCurrency = (quotation: Quotation) => {
+    const byCurrency: Record<string, number> = {}
+    quotation.quotation_items?.forEach(item => {
+      const currency = item.currency || 'TRY'
+      const subtotal = item.unit_price * item.quantity
+      const discount = subtotal * (item.discount_percentage / 100)
+      byCurrency[currency] = (byCurrency[currency] || 0) + (subtotal - discount)
+    })
+    return byCurrency
   }
 
   const handleDownloadPDF = async (quotationId: string, quotationNumber: string) => {
     try {
       setLoadingPdf(quotationId)
 
-      // Fetch full quotation data with items and products
       const { data: quotation, error } = await supabase
         .from('quotations')
         .select(`
           quotation_number,
-          companies (
-            name,
-            email,
-            phone,
-            tax_number
-          ),
+          companies (name, email, phone, tax_number),
           quotation_items (
             quantity,
             discount_percentage,
             original_request,
-            products (
-              product_code,
-              product_type,
-              diameter,
-              base_price,
-              currency,
-              unit
-            )
+            products (product_code, product_type, diameter, base_price, currency, unit)
           )
         `)
         .eq('id', quotationId)
         .single()
 
       if (error) throw error
+      if (!quotation) throw new Error('Teklif bulunamadı')
 
-      if (!quotation) {
-        alert('Teklif bulunamadı')
-        return
-      }
-
-      // Transform data to match PDF generator types
       const companyInfo = {
         name: quotation.companies.name,
         email: quotation.companies.email,
@@ -115,209 +151,166 @@ export default function QuotationsPage() {
         original_request: item.original_request
       }))
 
-      // Generate PDF (async with custom font)
       await generateQuotationPDF(companyInfo, items, quotation.quotation_number)
-
+      showToast('success', `${quotationNumber} PDF olarak indirildi.`)
     } catch (error) {
       console.error('PDF generation error:', error)
-      alert('PDF oluşturulurken hata oluştu: ' + (error instanceof Error ? error.message : 'Bilinmeyen hata'))
+      showToast('error', 'PDF oluşturulurken hata oluştu: ' + (error instanceof Error ? error.message : 'Bilinmeyen hata'))
     } finally {
       setLoadingPdf(null)
     }
   }
 
+  const handleStatusChange = async (quotationId: string, newStatus: string) => {
+    const { error } = await supabase
+      .from('quotations')
+      .update({ status: newStatus })
+      .eq('id', quotationId)
+
+    if (error) {
+      showToast('error', 'Durum güncellenirken hata: ' + error.message)
+    } else {
+      showToast('success', `Durum "${STATUS_LABELS[newStatus]}" olarak güncellendi.`)
+      loadQuotations()
+    }
+  }
+
   const handleDelete = async (quotationId: string, quotationNumber: string) => {
-    if (!confirm(`"${quotationNumber}" teklifi SİLİNECEK! Emin misiniz?\n\nBu işlem geri alınamaz.`)) {
-      return
+    if (!confirm(`"${quotationNumber}" teklifi SİLİNECEK! Bu işlem geri alınamaz.`)) return
+
+    const { error } = await supabase.from('quotations').delete().eq('id', quotationId)
+    if (error) {
+      showToast('error', 'Teklif silinirken hata oluştu: ' + error.message)
+    } else {
+      showToast('success', `"${quotationNumber}" silindi.`)
+      loadQuotations()
     }
-
-    try {
-      // Delete quotation (quotation_items will be cascade deleted)
-      const { error } = await supabase
-        .from('quotations')
-        .delete()
-        .eq('id', quotationId)
-
-      if (error) throw error
-
-      alert('Teklif başarıyla silindi')
-      loadQuotations() // Reload list
-    } catch (error) {
-      console.error('Delete error:', error)
-      alert('Teklif silinirken hata oluştu: ' + (error instanceof Error ? error.message : 'Bilinmeyen hata'))
-    }
-  }
-
-  const handleEdit = (quotationId: string) => {
-    window.location.href = `/quotations/${quotationId}/edit`
-  }
-
-  const getStatusBadge = (status: string) => {
-    const styles = {
-      draft: 'bg-gray-100 text-gray-800',
-      sent: 'bg-blue-100 text-blue-800',
-      approved: 'bg-green-100 text-green-800',
-      rejected: 'bg-red-100 text-red-800'
-    }
-
-    const labels = {
-      draft: 'Taslak',
-      sent: 'Gönderildi',
-      approved: 'Onaylandı',
-      rejected: 'Reddedildi'
-    }
-
-    return (
-      <span className={`px-2 py-1 rounded text-xs font-medium ${styles[status as keyof typeof styles]}`}>
-        {labels[status as keyof typeof labels]}
-      </span>
-    )
-  }
-
-  const getCurrencySymbol = (currency: string) => {
-    switch (currency) {
-      case 'TRY':
-      case 'TL':
-        return '₺'
-      case 'USD':
-        return '$'
-      case 'EUR':
-        return '€'
-      default:
-        return currency
-    }
-  }
-
-  // Calculate totals by currency for each quotation
-  const calculateTotalsByCurrency = (quotation: Quotation) => {
-    const byCurrency: Record<string, number> = {}
-
-    quotation.quotation_items?.forEach(item => {
-      const currency = item.currency || 'TRY'
-      const subtotal = item.unit_price * item.quantity
-      const discount = subtotal * (item.discount_percentage / 100)
-      const total = subtotal - discount
-
-      if (!byCurrency[currency]) {
-        byCurrency[currency] = 0
-      }
-      byCurrency[currency] += total
-    })
-
-    return byCurrency
   }
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-gray-800">Teklifler</h1>
+    <div className="relative">
+
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed top-4 right-4 z-50 flex items-center gap-3 px-5 py-3 rounded-xl shadow-lg text-white text-sm font-medium transition-all ${toast.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}`}>
+          <span>{toast.type === 'success' ? '✅' : '❌'}</span>
+          <span>{toast.message}</span>
+        </div>
+      )}
+
+      {/* Header */}
+      <div className="flex justify-between items-start mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">📄 Teklifler</h1>
+          <p className="text-gray-500 text-sm mt-1">
+            {loading ? 'Yükleniyor...' : `${quotations.length} teklif`}
+          </p>
+        </div>
         <Link
           href="/quotations/new"
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium text-sm transition-colors"
         >
           + Yeni Teklif
         </Link>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b">
-              <th className="text-left p-4">Teklif No</th>
-              <th className="text-left p-4">Firma</th>
-              <th className="text-left p-4">Durum</th>
-              <th className="text-right p-4">Tutar</th>
-              <th className="text-left p-4">Tarih</th>
-              <th className="text-center p-4">İşlemler</th>
-            </tr>
-          </thead>
-          <tbody>
-            {quotations.map(quotation => (
-              <tr key={quotation.id} className="border-b hover:bg-gray-50">
-                <td className="p-4 font-medium">{quotation.quotation_number}</td>
-                <td className="p-4">{quotation.companies.name}</td>
-                <td className="p-4">{getStatusBadge(quotation.status)}</td>
-                <td className="p-4 text-right font-semibold">
-                  {(() => {
-                    // Try to calculate from items first (for multi-currency support)
-                    if (quotation.quotation_items && quotation.quotation_items.length > 0) {
-                      const totals = calculateTotalsByCurrency(quotation)
-                      const currencies = Object.keys(totals)
+      {/* Table */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        {loading ? (
+          <div className="p-12 text-center text-gray-400">
+            <div className="text-3xl mb-2 animate-bounce">⏳</div>
+            <p>Yükleniyor...</p>
+          </div>
+        ) : quotations.length === 0 ? (
+          <div className="p-12 text-center text-gray-400">
+            <div className="text-4xl mb-3">📭</div>
+            <p className="font-medium text-gray-600 mb-1">Henüz teklif oluşturulmamış</p>
+            <p className="text-sm mb-4">İlk teklifinizi oluşturmak için aşağıdaki butona tıklayın.</p>
+            <Link href="/quotations/new" className="inline-block px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm">
+              + Yeni Teklif Oluştur
+            </Link>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Teklif No</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Firma</th>
+                  <th className="text-center px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Durum</th>
+                  <th className="text-right px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Tutar</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Tarih</th>
+                  <th className="text-center px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">İşlemler</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {quotations.map(quotation => {
+                  const totals = calculateTotalsByCurrency(quotation)
+                  const currencies = Object.keys(totals)
 
-                      if (currencies.length === 0) {
-                        // Fallback to main amount
-                        return (
-                          <span>
-                            {(quotation.final_amount || 0).toFixed(2)} {getCurrencySymbol(quotation.currency || 'TRY')}
-                          </span>
-                        )
-                      }
-
-                      if (currencies.length === 1) {
-                        const currency = currencies[0]
-                        return (
-                          <span>
-                            {totals[currency].toFixed(2)} {getCurrencySymbol(currency)}
-                          </span>
-                        )
-                      }
-
-                      // Multiple currencies - show each on separate line
-                      return (
-                        <div className="flex flex-col gap-1">
-                          {currencies.map(currency => (
-                            <div key={currency}>
-                              {totals[currency].toFixed(2)} {getCurrencySymbol(currency)}
-                            </div>
+                  return (
+                    <tr key={quotation.id} className="hover:bg-indigo-50/30 transition-colors">
+                      <td className="px-5 py-3.5 font-mono font-semibold text-gray-900">{quotation.quotation_number}</td>
+                      <td className="px-5 py-3.5 text-gray-700">{quotation.companies?.name || '—'}</td>
+                      <td className="px-5 py-3.5 text-center">
+                        <select
+                          value={normalizeStatus(quotation.status)}
+                          onChange={(e) => handleStatusChange(quotation.id, e.target.value)}
+                          className={`px-2.5 py-1 rounded-full text-xs font-medium border-0 cursor-pointer ${STATUS_STYLES[normalizeStatus(quotation.status)] || STATUS_STYLES.draft}`}
+                        >
+                          {STATUS_OPTIONS.map(s => (
+                            <option key={s} value={s}>{STATUS_LABELS[s]}</option>
                           ))}
+                          {/* expired is system-assigned; show it only if already set */}
+                          {normalizeStatus(quotation.status) === 'expired' && (
+                            <option value="expired">{STATUS_LABELS.expired}</option>
+                          )}
+                        </select>
+                      </td>
+                      <td className="px-5 py-3.5 text-right font-semibold text-gray-900">
+                        {currencies.length === 0 ? (
+                          <span>{(quotation.final_amount || 0).toFixed(2)} {getCurrencySymbol(quotation.currency || 'TRY')}</span>
+                        ) : currencies.length === 1 ? (
+                          <span>{totals[currencies[0]].toFixed(2)} {getCurrencySymbol(currencies[0])}</span>
+                        ) : (
+                          <div className="flex flex-col gap-0.5 items-end">
+                            {currencies.map(c => (
+                              <span key={c} className="text-xs">{totals[c].toFixed(2)} {getCurrencySymbol(c)}</span>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-500 text-xs">
+                        {new Date(quotation.created_at).toLocaleDateString('tr-TR')}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex gap-1.5 justify-center flex-wrap">
+                          <button
+                            onClick={() => handleDownloadPDF(quotation.id, quotation.quotation_number)}
+                            disabled={loadingPdf === quotation.id}
+                            className="px-3 py-1 text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-50 transition-colors"
+                          >
+                            {loadingPdf === quotation.id ? '⏳' : '📄'} PDF
+                          </button>
+                          <button
+                            onClick={() => window.location.href = `/quotations/${quotation.id}/edit`}
+                            className="px-3 py-1 text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors"
+                          >
+                            ✏️ Düzenle
+                          </button>
+                          <button
+                            onClick={() => handleDelete(quotation.id, quotation.quotation_number)}
+                            className="px-3 py-1 text-xs bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100 transition-colors"
+                          >
+                            🗑️ Sil
+                          </button>
                         </div>
-                      )
-                    }
-
-                    // Fallback: Use main final_amount from quotation
-                    return (
-                      <span>
-                        {(quotation.final_amount || 0).toFixed(2)} {getCurrencySymbol(quotation.currency || 'TRY')}
-                      </span>
-                    )
-                  })()}
-                </td>
-                <td className="p-4 text-sm text-gray-600">
-                  {new Date(quotation.created_at).toLocaleDateString('tr-TR')}
-                </td>
-                <td className="p-4">
-                  <div className="flex gap-2 justify-center">
-                    <button
-                      onClick={() => handleDownloadPDF(quotation.id, quotation.quotation_number)}
-                      disabled={loadingPdf === quotation.id}
-                      className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-                      title="PDF İndir"
-                    >
-                      {loadingPdf === quotation.id ? '...' : '📄 PDF'}
-                    </button>
-                    <button
-                      onClick={() => handleEdit(quotation.id)}
-                      className="px-3 py-1 bg-yellow-600 text-white text-sm rounded hover:bg-yellow-700"
-                      title="Düzenle"
-                    >
-                      ✏️ Düzenle
-                    </button>
-                    <button
-                      onClick={() => handleDelete(quotation.id, quotation.quotation_number)}
-                      className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700"
-                      title="Sil"
-                    >
-                      🗑️ Sil
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {quotations.length === 0 && (
-          <div className="p-8 text-center text-gray-500">
-            Henüz teklif oluşturulmamış
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

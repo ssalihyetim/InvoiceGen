@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { getAuthContext, requirePermission } from '@/lib/api-auth'
 
 export async function POST(request: NextRequest) {
+  const auth = await getAuthContext(request)
+  if (auth instanceof NextResponse) return auth
+
+  const denied = requirePermission(auth, 'products', 'create')
+  if (denied) return denied
+
+  // tenant_id is derived from the session — a client-supplied value in the
+  // body is deliberately ignored (it used to be trusted; audit A-4).
+  const { supabase, tenantId } = auth
+
   try {
     const body = await request.json()
     const { products, fileName, fileSize } = body
@@ -76,6 +86,7 @@ export async function POST(request: NextRequest) {
           currency: currency,
           unit: product.unit || 'adet',
           description: product.description || null,
+          tenant_id: tenantId,
         }
 
         validProducts.push(productData)
@@ -128,6 +139,7 @@ export async function POST(request: NextRequest) {
           successful_imports: successCount,
           failed_imports: failedCount,
           error_log: errors.length > 0 ? errors : null,
+          tenant_id: tenantId,
         })
 
       if (historyError) {
