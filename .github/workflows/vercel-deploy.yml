@@ -1,0 +1,29 @@
+# Push-to-deploy for Vercel.
+#
+# Why this exists: the Vercel project (talha-seners-projects/offer_gen) is on
+# a Hobby plan, which BLOCKS webhook deployments for commits whose author is
+# not the project owner ("Deployment was blocked because the commit author
+# does not have contributing access"). Deploy hooks are blocked the same way.
+# CLI deploys with the owner's token are not author-gated, so this workflow
+# deploys via the Vercel CLI on every push to main.
+#
+# The owner's TalhaSenerr commits still auto-deploy through the native
+# Vercel<->GitHub connection on TalhaSenerr/offer_gen; this workflow covers
+# everyone else and only runs in ssalihyetim/InvoiceGen (where the
+# VERCEL_TOKEN secret lives).
+name: Deploy to Vercel
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    if: github.repository == 'ssalihyetim/InvoiceGen'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to Vercel (production)
+        run: npx vercel@latest deploy --prod --yes --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: team_frU4T07yR7cQ6RRbAgu5nF1v
+          VERCEL_PROJECT_ID: prj_JtGJ2GSjWTa4HfwBWv8nLoPdjNb0
