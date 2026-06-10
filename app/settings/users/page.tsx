@@ -7,10 +7,10 @@ import { Role, ROLE_LABELS, ROLE_COLORS } from '@/lib/permissions'
 
 type TenantUser = {
   id: string
-  user_id: string
+  user_id: string | null
   role: Role
-  created_at: string
-  email?: string
+  created_at: string | null
+  email?: string | null
 }
 
 export default function UsersPage() {
@@ -121,11 +121,11 @@ export default function UsersPage() {
             <tbody>
               {users.map(u => (
                 <tr key={u.id} className="border-t border-gray-100">
-                  <td className="p-4 font-mono text-xs">{u.user_id.slice(0, 8)}...</td>
+                  <td className="p-4 font-mono text-xs">{(u.user_id ?? '').slice(0, 8)}...</td>
                   <td className="p-4">
                     <select
                       value={u.role}
-                      onChange={(e) => handleUpdateRole(u.user_id, e.target.value as Role)}
+                      onChange={(e) => u.user_id && handleUpdateRole(u.user_id, e.target.value as Role)}
                       className="px-2 py-1 border border-gray-300 rounded text-sm"
                     >
                       {(Object.keys(ROLE_LABELS) as Role[]).map(r => (
@@ -137,11 +137,11 @@ export default function UsersPage() {
                     </span>
                   </td>
                   <td className="p-4 text-gray-500">
-                    {new Date(u.created_at).toLocaleDateString('tr-TR')}
+                    {u.created_at ? new Date(u.created_at).toLocaleDateString('tr-TR') : '-'}
                   </td>
                   <td className="p-4 text-center">
                     <button
-                      onClick={() => handleRemoveUser(u.user_id)}
+                      onClick={() => u.user_id && handleRemoveUser(u.user_id)}
                       className="text-red-600 hover:text-red-800 text-sm"
                     >
                       Kaldır

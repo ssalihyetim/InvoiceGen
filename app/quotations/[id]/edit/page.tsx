@@ -23,10 +23,10 @@ type Product = {
   id: string
   product_type: string
   diameter: string | null
-  product_code: string
+  product_code: string | null
   base_price: number
-  currency: string
-  unit: string
+  currency: string | null
+  unit: string | null
   description: string | null
 }
 
@@ -133,7 +133,7 @@ export default function EditQuotationPage() {
 
       if (data) {
         setQuotationNumber(data.quotation_number)
-        setSelectedCompany(data.company_id)
+        setSelectedCompany(data.company_id ?? '')
 
         // Transform quotation_items to items format
         const loadedItems = data.quotation_items.map((item: any) => ({
@@ -517,6 +517,11 @@ export default function EditQuotationPage() {
       return
     }
 
+    if (!tenantId) {
+      alert('Oturum bilgisi henüz yüklenmedi, lütfen tekrar deneyin')
+      return
+    }
+
     if (!confirm(`"${quotationNumber}" teklifi GÜNCELLENECEK! Devam etmek istiyor musunuz?`)) {
       return
     }
@@ -617,7 +622,7 @@ export default function EditQuotationPage() {
     if (!productSearch) return true
     const search = productSearch.toLowerCase()
     return (
-      p.product_code.toLowerCase().includes(search) ||
+      (p.product_code ?? '').toLowerCase().includes(search) ||
       p.product_type.toLowerCase().includes(search) ||
       (p.diameter && p.diameter.toLowerCase().includes(search))
     )
@@ -626,8 +631,8 @@ export default function EditQuotationPage() {
   const totals = calculateTotals()
   const totalsByCurrency = calculateTotalsByCurrency()
 
-  const getCurrencySymbol = (currency: string) => {
-    switch (currency) {
+  const getCurrencySymbol = (currency: string | null) => {
+    switch (currency ?? 'TRY') {
       case 'TRY':
       case 'TL':
         return '₺'

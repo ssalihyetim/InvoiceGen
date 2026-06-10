@@ -24,12 +24,12 @@ type ImportError = {
 type ImportHistory = {
   id: string
   file_name: string
-  file_size: number
-  total_rows: number
-  successful_imports: number
-  failed_imports: number
+  file_size: number | null
+  total_rows: number | null
+  successful_imports: number | null
+  failed_imports: number | null
   error_log: any
-  created_at: string
+  created_at: string | null
 }
 
 // Key normalization: handles trailing/leading spaces and case variations
@@ -475,14 +475,14 @@ export default function ImportPage() {
                         {history.failed_imports}
                       </td>
                       <td className="p-3 text-right text-gray-600">
-                        {formatFileSize(history.file_size)}
+                        {formatFileSize(history.file_size ?? 0)}
                       </td>
                       <td className="p-3 text-gray-600">
-                        {formatDate(history.created_at)}
+                        {history.created_at ? formatDate(history.created_at) : '-'}
                       </td>
                       <td className="p-3">
                         <div className="flex gap-2 justify-center">
-                          {history.failed_imports > 0 && history.error_log && (
+                          {(history.failed_imports ?? 0) > 0 && history.error_log && (
                             <button
                               onClick={() => {
                                 alert(JSON.stringify(history.error_log, null, 2))

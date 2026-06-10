@@ -129,6 +129,7 @@ export default function QuotationsPage() {
 
       if (error) throw error
       if (!quotation) throw new Error('Teklif bulunamadı')
+      if (!quotation.companies) throw new Error('Teklifin firması bulunamadı')
 
       const companyInfo = {
         name: quotation.companies.name,

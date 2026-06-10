@@ -9,12 +9,12 @@ type CompanyInfo = {
 
 type QuotationItem = {
   product: {
-    product_code: string
+    product_code: string | null
     product_type: string
     diameter?: string | null
     base_price: number
-    currency: string
-    unit: string
+    currency: string | null
+    unit: string | null
   }
   quantity: number
   discount_percentage: number
@@ -22,8 +22,9 @@ type QuotationItem = {
 }
 
 // Currency symbol helper - returns symbol or fallback text
-const getCurrencySymbol = (currency: string, fontLoaded: boolean = true): string => {
-  switch (currency.toUpperCase()) {
+const getCurrencySymbol = (currency: string | null | undefined, fontLoaded: boolean = true): string => {
+  const cur = currency || 'TRY'
+  switch (cur.toUpperCase()) {
     case 'TL':
     case 'TRY':
       // Use symbol if custom font loaded, otherwise use text
@@ -34,7 +35,7 @@ const getCurrencySymbol = (currency: string, fontLoaded: boolean = true): string
       // Euro symbol may not render in default font
       return fontLoaded ? '€' : 'EUR'
     default:
-      return currency
+      return cur
   }
 }
 
@@ -213,13 +214,13 @@ export const generateQuotationPDF = async (
 
     doc.setFontSize(8)
     doc.text(`${index + 1}`, 12, yPos)
-    doc.text(sanitizeText(item.product.product_code), 18, yPos)
+    doc.text(sanitizeText(item.product.product_code ?? ''), 18, yPos)
 
     doc.setFontSize(7)
     doc.text(nameLines, 50, yPos)
     doc.setFontSize(8)
 
-    doc.text(`${quantity} ${sanitizeText(item.product.unit)}`, 95, yPos)
+    doc.text(`${quantity} ${sanitizeText(item.product.unit ?? 'adet')}`, 95, yPos)
     doc.text(`${unitPrice.toFixed(2)} ${currSymbol}`, 110, yPos)
     doc.text(`%${discount}`, 133, yPos)
     doc.text(`${discountedUnitPrice.toFixed(2)} ${currSymbol}`, 148, yPos)
@@ -236,7 +237,7 @@ export const generateQuotationPDF = async (
   const totalsByCurrency: Record<string, { total: number; discount: number; final: number }> = {}
 
   items.forEach(item => {
-    const currency = item.product.currency
+    const currency = item.product.currency || 'TRY'
     if (!totalsByCurrency[currency]) {
       totalsByCurrency[currency] = { total: 0, discount: 0, final: 0 }
     }

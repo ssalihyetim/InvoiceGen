@@ -480,6 +480,11 @@ export default function NewQuotationPage() {
       return
     }
 
+    if (!tenantId) {
+      alert('Oturum bilgisi henüz yüklenmedi, lütfen tekrar deneyin')
+      return
+    }
+
     setSaving(true)
     try {
       const totals = calculateTotals()

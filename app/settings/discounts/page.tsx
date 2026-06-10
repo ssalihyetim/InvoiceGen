@@ -56,7 +56,7 @@ export default function DiscountsPage() {
   }
 
   const handleSave = async () => {
-    if (!formCompanyId || formPercentage <= 0) return
+    if (!formCompanyId || formPercentage <= 0 || !tenantId) return
     setSaving(true)
 
     const supabase = createSupabaseBrowserClient()
