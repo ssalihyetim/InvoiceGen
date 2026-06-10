@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import * as XLSX from 'xlsx'
+import { buildWorkbook } from '@/lib/excel'
 
 export async function GET() {
   try {
@@ -26,13 +26,9 @@ export async function GET() {
       )
     }
 
-    const ws = XLSX.utils.json_to_sheet(rows)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Teklif')
+    const buffer = await buildWorkbook(rows, 'Teklif')
 
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
-
-    return new NextResponse(buffer, {
+    return new NextResponse(Buffer.from(buffer), {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': 'attachment; filename="ornek-teklif.xlsx"',

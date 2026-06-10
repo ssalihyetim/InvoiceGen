@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import * as XLSX from 'xlsx'
+import { readWorkbook } from '@/lib/excel'
 import Papa from 'papaparse'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
@@ -266,18 +266,17 @@ export default function ImportPage() {
     } else {
       // Parse Excel
       const data = await selectedFile.arrayBuffer()
-      const workbook = XLSX.read(data, { cellDates: true })
+      const workbook = await readWorkbook(data)
 
       // Tüm sheet isimlerini al
-      setSheetNames(workbook.SheetNames)
+      setSheetNames(workbook.sheetNames)
 
       // İlk sheet'i otomatik seç ve önizle
-      if (workbook.SheetNames.length > 0) {
-        const firstSheet = workbook.SheetNames[0]
+      if (workbook.sheetNames.length > 0) {
+        const firstSheet = workbook.sheetNames[0]
         setSelectedSheets([firstSheet])
 
-        const worksheet = workbook.Sheets[firstSheet]
-        const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[]
+        const jsonData = workbook.sheetToJson(firstSheet)
 
         // Convert to our format
         const products: ProductRow[] = jsonData.map(parseProductRow)
@@ -304,9 +303,8 @@ export default function ImportPage() {
     // İlk seçili sheet'in önizlemesini göster
     if (newSelection.length > 0 && file) {
       const data = await file.arrayBuffer()
-      const workbook = XLSX.read(data, { cellDates: true })
-      const worksheet = workbook.Sheets[newSelection[0]]
-      const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[]
+      const workbook = await readWorkbook(data)
+      const jsonData = workbook.sheetToJson(newSelection[0])
 
       const products: ProductRow[] = jsonData.map(parseProductRow)
 
@@ -360,7 +358,7 @@ export default function ImportPage() {
       } else {
         // Excel import
         const data = await file.arrayBuffer()
-        const workbook = XLSX.read(data, { cellDates: true })
+        const workbook = await readWorkbook(data)
 
         // Tüm seçili sheet'lerden ürünleri topla
         for (let i = 0; i < selectedSheets.length; i++) {
@@ -369,8 +367,7 @@ export default function ImportPage() {
 
           console.log(`[${i + 1}/${selectedSheets.length}] İşleniyor: ${sheetName}`)
 
-          const worksheet = workbook.Sheets[sheetName]
-          const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[]
+          const jsonData = workbook.sheetToJson(sheetName)
 
           console.log(`  → ${sheetName}: ${jsonData.length} satır bulundu`)
 

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
-import * as XLSX from 'xlsx'
+import { readWorkbook } from '@/lib/excel'
 import ImageUploadTab from '@/components/quotations/ImageUploadTab'
 import ProductSelectionModal from '@/components/quotations/ProductSelectionModal'
 import BatchMultiMatchModal from '@/components/quotations/BatchMultiMatchModal'
@@ -262,9 +262,8 @@ export default function EditQuotationPage() {
 
     try {
       const data = await file.arrayBuffer()
-      const workbook = XLSX.read(data)
-      const worksheet = workbook.Sheets[workbook.SheetNames[0]]
-      const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[]
+      const workbook = await readWorkbook(data)
+      const jsonData = workbook.sheetToJson(workbook.sheetNames[0])
 
       console.log('Excel Data:', jsonData)
 
