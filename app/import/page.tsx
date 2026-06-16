@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { readWorkbook } from '@/lib/excel'
 import Papa from 'papaparse'
-import { supabase } from '@/lib/supabase'
+import { createSupabaseBrowserClient } from '@/lib/supabase-browser'
 import { useAuth } from '@/lib/auth-context'
 
 type ProductRow = {
@@ -37,6 +37,7 @@ type ImportHistory = {
 const normalizeKey = (key: string): string => key.toLocaleLowerCase('tr-TR').trim()
 
 export default function ImportPage() {
+  const supabase = createSupabaseBrowserClient()
   const { tenantId } = useAuth()
   const [file, setFile] = useState<File | null>(null)
   const [sheetNames, setSheetNames] = useState<string[]>([])

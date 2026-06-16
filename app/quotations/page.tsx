@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
+import { createSupabaseBrowserClient } from '@/lib/supabase-browser'
 import Link from 'next/link'
 import { generateQuotationPDF } from '@/lib/pdf-generator'
 import { useAuth } from '@/lib/auth-context'
@@ -53,6 +53,7 @@ function getCurrencySymbol(currency: string) {
 }
 
 export default function QuotationsPage() {
+  const supabase = createSupabaseBrowserClient()
   const { tenantId } = useAuth()
   const [quotations, setQuotations] = useState<Quotation[]>([])
   const [loading, setLoading] = useState(true)

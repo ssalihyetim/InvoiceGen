@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
+import { createSupabaseBrowserClient } from '@/lib/supabase-browser'
 import { useAuth } from '@/lib/auth-context'
 
 type Product = {
@@ -18,6 +18,7 @@ type Product = {
 type Toast = { type: 'success' | 'error'; message: string }
 
 export default function ProductsPage() {
+  const supabase = createSupabaseBrowserClient()
   const { tenantId } = useAuth()
   const [products, setProducts] = useState<Product[]>([])
   const [totalCount, setTotalCount] = useState<number>(0)

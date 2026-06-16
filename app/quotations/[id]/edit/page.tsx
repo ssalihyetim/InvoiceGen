@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
+import { createSupabaseBrowserClient } from '@/lib/supabase-browser'
 import { useParams, useRouter } from 'next/navigation'
 import { readWorkbook } from '@/lib/excel'
 import ImageUploadTab from '@/components/quotations/ImageUploadTab'
@@ -39,6 +39,7 @@ type QuotationItem = {
 }
 
 export default function EditQuotationPage() {
+  const supabase = createSupabaseBrowserClient()
   const { tenantId } = useAuth()
   const params = useParams()
   const router = useRouter()

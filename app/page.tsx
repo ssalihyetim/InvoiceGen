@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { createSupabaseBrowserClient } from '@/lib/supabase-browser'
 import { normalizeStatus } from '@/lib/quotation-status'
 
 interface Quotation {
@@ -41,6 +41,7 @@ const statusStyles: Record<string, string> = {
 }
 
 export default function Home() {
+  const supabase = createSupabaseBrowserClient()
   const now = new Date()
   const defaultStart = toDateStr(new Date(now.getFullYear(), now.getMonth(), 1))
   const defaultEnd = toDateStr(now)

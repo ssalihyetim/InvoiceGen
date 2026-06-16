@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
+import { createSupabaseBrowserClient } from '@/lib/supabase-browser'
 import { useAuth } from '@/lib/auth-context'
 
 type Company = {
@@ -15,6 +15,7 @@ type Company = {
 type Toast = { type: 'success' | 'error'; message: string }
 
 export default function CompaniesPage() {
+  const supabase = createSupabaseBrowserClient()
   const { tenantId } = useAuth()
   const [companies, setCompanies] = useState<Company[]>([])
   const [loading, setLoading] = useState(true)

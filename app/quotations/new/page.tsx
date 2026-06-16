@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
+import { createSupabaseBrowserClient } from '@/lib/supabase-browser'
 import { readWorkbook } from '@/lib/excel'
 import ImageUploadTab from '@/components/quotations/ImageUploadTab'
 import ProductSelectionModal from '@/components/quotations/ProductSelectionModal'
@@ -38,6 +38,7 @@ type QuotationItem = {
 }
 
 export default function NewQuotationPage() {
+  const supabase = createSupabaseBrowserClient()
   const { tenantId } = useAuth()
   const [companies, setCompanies] = useState<Company[]>([])
   const [selectedCompany, setSelectedCompany] = useState<string>('')
