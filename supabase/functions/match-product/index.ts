@@ -12,7 +12,7 @@ const corsHeaders = {
 // ============================================
 
 // Ürün tipi sözlüğü — bu kelimeler ürün tipini belirler, yüksek ağırlık alır
-const PRODUCT_TYPE_TERMS: Record<string, string[]> = {
+export const PRODUCT_TYPE_TERMS: Record<string, string[]> = {
   'MANŞON': ['MANSON', 'MANŞON', 'MANSION'],
   'DİRSEK': ['DIRSEK', 'DİRSEK'],
   'REDÜKSİYON': ['REDUKSIYON', 'REDÜKSİYON', 'REDUKSI'],
@@ -46,19 +46,19 @@ const MATERIAL_TERMS = new Set([
 ])
 
 // Eşleşme eşiği — bunun altındaki sonuçlar UI'ya gönderilmez (UI gate 0.3, bu yedek üstü).
-const MIN_CONFIDENCE = 0.35
+export const MIN_CONFIDENCE = 0.35
 
 // Yapısal-kategori çatışma haritası. BORU bir hat ürünü; geri kalanlar bağlantı parçası.
 // Bir hat ürünü (BORU) ile bir bağlantı parçası talebi yapısal olarak zıttır → hard reject.
 // Compound korumalı: çatışma sadece talebin tipi ürünün HİÇBİR tipinde yoksa uygulanır
 // (ör. "KAPLİN DİRSEK" ürünü hem KAPLİN hem DİRSEK içerir, DİRSEK talebini reddetmez).
-const INCOMPATIBLE_TYPES: Record<string, string[]> = {
+export const INCOMPATIBLE_TYPES: Record<string, string[]> = {
   'BORU': ['DİRSEK', 'MANŞON', 'TE', 'REDÜKSİYON', 'RAKOR', 'FLANŞ', 'VANA', 'ADAPTÖR', 'KÖRTAPA', 'SEMER', 'KAPLİN'],
 }
 
 // Türkçe metin normalizasyonu: derece işaretlerini birleştir (° U+00B0 → º U+00BA,
 // katalogda º kullanılıyor), çoklu boşluk sadeleştir. Türkçe İ/I büyük harf tutarlılığı.
-function normalizeText(s: string): string {
+export function normalizeText(s: string): string {
   return s
     .replace(/°/g, 'º')            // U+00B0 → U+00BA (katalog formatı)
     .replace(/ /g, ' ')       // non-breaking space
@@ -71,7 +71,7 @@ const PRESSURE_RE = /^(PN|SDR|DN)\d+$/i
 
 // Talep metninden çapları çıkar. Öncelik: D-prefix > MM-suffix > AxB redüksiyon > en büyük makul sayı.
 // Açılar (90º, 45º) çaptan dışlanır.
-function extractDimensions(raw: string): { diameters: string[]; angles: string[]; primaryDiameter?: string; reductionPattern?: string } {
+export function extractDimensions(raw: string): { diameters: string[]; angles: string[]; primaryDiameter?: string; reductionPattern?: string } {
   const norm = normalizeText(raw).toUpperCase()
 
   // 1. Açılar: <sayı>º veya <sayı> DERECE → açı listesi (çaptan dışlanacak).
@@ -131,13 +131,13 @@ function extractDimensions(raw: string): { diameters: string[]; angles: string[]
 
 // Ürünün search_text'inde verilen çapın geçip geçmediğini kontrol eder.
 // Word-boundary + mm-toleranslı: "355" → "355MM"/"355mm"/"355 MM" eşleşir, "1355" eşleşmez.
-function productHasDiameter(searchText: string, dia: string): boolean {
+export function productHasDiameter(searchText: string, dia: string): boolean {
   const re = new RegExp(`(^|[^0-9])${dia}(\\s*MM)?([^0-9]|$)`, 'i')
   return re.test(searchText)
 }
 
 // Talep/ürün metninden kanonik yapısal tipleri çıkarır (PRODUCT_TYPE_TERMS üzerinden).
-function getCanonicalTypes(text: string): Set<string> {
+export function getCanonicalTypes(text: string): Set<string> {
   const upper = text.toUpperCase()
   const found = new Set<string>()
   for (const [canonical, variants] of Object.entries(PRODUCT_TYPE_TERMS)) {
@@ -149,14 +149,14 @@ function getCanonicalTypes(text: string): Set<string> {
 // Bir tip keyword'ü (ör. ASCII "DIRSEK") metinde varyantlarıyla birlikte arar.
 // Türkçe İ/I sorunu: talep "DIRSEK" (ASCII) gelir ama katalog "DİRSEK" (Türkçe) saklar;
 // kw'nin kanonik grubundaki TÜM varyantları kontrol ederek eşleşmeyi yakalar.
-function typeKeywordInText(text: string, kw: string): boolean {
+export function typeKeywordInText(text: string, kw: string): boolean {
   for (const variants of Object.values(PRODUCT_TYPE_TERMS)) {
     if (variants.includes(kw)) return variants.some(v => text.includes(v))
   }
   return text.includes(kw)
 }
 
-interface ParsedRequest {
+export interface ParsedRequest {
   originalRequest: string
   normalizedRequest: string // normalizeText uygulanmış ham ifade (FTS için)
   productCode?: string      // Tespit edilen ürün kodu
@@ -180,7 +180,7 @@ interface MatchResult {
 }
 
 // Parsing: Müşteri talebini analiz et
-function parseCustomerRequest(request: string): ParsedRequest {
+export function parseCustomerRequest(request: string): ParsedRequest {
   const originalRequest = request
   const normalizedRequest = normalizeText(request)
   const normalized = normalizedRequest.toUpperCase()
@@ -327,7 +327,7 @@ async function exactMatch(supabase: any, parsed: ParsedRequest): Promise<MatchRe
 
 // Ağırlıklı skor hesaplama — ürün tipi kelimeleri 3x, malzeme 2x, diğer 1x.
 // Hard reject: çap tutmuyorsa veya yapısal tip zıtsa aday tamamen elenir (rejected:true).
-function calculateWeightedScore(product: any, parsed: ParsedRequest): { score: number, matchDetail: string, rejected: boolean } {
+export function calculateWeightedScore(product: any, parsed: ParsedRequest): { score: number, matchDetail: string, rejected: boolean } {
   const searchText = (product.search_text || "").toUpperCase()
   const productType = (product.product_type || "").toUpperCase()
 
@@ -413,7 +413,7 @@ function calculateWeightedScore(product: any, parsed: ParsedRequest): { score: n
 
 // Bir aday listesini calculateWeightedScore ile skorlar, rejected (çap/tip gate) olanları atar.
 // confidence = clamp(base + ratio*span + typeBonus). Çap eşleşmesine küçük ek bonus.
-function scoreAndGate(
+export function scoreAndGate(
   products: any[],
   parsed: ParsedRequest,
   base: number,
