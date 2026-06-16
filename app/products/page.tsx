@@ -17,11 +17,14 @@ type Product = {
 
 type Toast = { type: 'success' | 'error'; message: string }
 
+const PAGE_SIZE = 100
+
 export default function ProductsPage() {
   const supabase = createSupabaseBrowserClient()
   const { tenantId } = useAuth()
   const [products, setProducts] = useState<Product[]>([])
   const [totalCount, setTotalCount] = useState<number>(0)
+  const [page, setPage] = useState(0)
   const [search, setSearch] = useState('')
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -50,11 +53,10 @@ export default function ProductsPage() {
     setTimeout(() => setToast(null), 4000)
   }
 
-  useEffect(() => {
-    loadProducts()
-  }, [])
-
-  const loadProducts = async () => {
+  // Server-side pagination: yalnız geçerli sayfayı (100 ürün) çeker. count:'exact' ile
+  // toplam, sayfa verisiyle TEK round-trip'te gelir. (Eski while-loop 6440 ürünü RAM'e
+  // çekip hepsini render ediyordu → kasma.)
+  const loadProducts = async (targetPage = 0) => {
     setLoading(true)
     try {
       if (search) {
@@ -69,38 +71,27 @@ export default function ProductsPage() {
         if (exactResult.error) throw exactResult.error
         if (exactResult.data && exactResult.data.length > 0) {
           setProducts(exactResult.data as any)
-          setTotalCount(exactResult.count || 0)
+          setTotalCount(exactResult.count || exactResult.data.length)
+          setPage(0)
           setLoading(false)
           return
         }
       }
 
-      const PAGE = 1000
-      const allProducts: Product[] = []
-      let from = 0
+      const fromRow = targetPage * PAGE_SIZE
+      let q = supabase
+        .from('products')
+        .select('*', { count: 'exact' })
+        .order('product_code')
+        .range(fromRow, fromRow + PAGE_SIZE - 1)
+      if (search) q = q.or(`product_code.ilike.%${search}%,product_type.ilike.%${search}%,diameter.ilike.%${search}%`)
+      if (filters.zeroPriceOnly) q = q.eq('base_price', 0)
+      if (filters.currency) q = q.eq('currency', filters.currency)
+      const { data, count, error } = await q
+      if (error) throw error
 
-      while (true) {
-        let q = supabase.from('products').select('*').order('product_code').range(from, from + PAGE - 1)
-        if (search) q = q.or(`product_code.ilike.%${search}%,product_type.ilike.%${search}%,diameter.ilike.%${search}%`)
-        if (filters.zeroPriceOnly) q = q.eq('base_price', 0)
-        if (filters.currency) q = q.eq('currency', filters.currency)
-        const { data, error } = await q
-        if (error) throw error
-        if (!data || data.length === 0) break
-        allProducts.push(...(data as Product[]))
-        if (data.length < PAGE) break
-        from += PAGE
-      }
-
-      let countQuery = supabase.from('products').select('*', { count: 'exact', head: true })
-      if (search) countQuery = countQuery.or(`product_code.ilike.%${search}%,product_type.ilike.%${search}%,diameter.ilike.%${search}%`)
-      if (filters.zeroPriceOnly) countQuery = countQuery.eq('base_price', 0)
-      if (filters.currency) countQuery = countQuery.eq('currency', filters.currency)
-      const { count, error: countError } = await countQuery
-      if (countError) throw countError
-
-      setProducts(allProducts)
-      setTotalCount(count || allProducts.length)
+      setProducts((data || []) as Product[])
+      setTotalCount(count || 0)
     } catch (err: any) {
       showToast('error', 'Ürünler yüklenirken hata oluştu: ' + (err.message || 'Bağlantı hatası'))
     } finally {
@@ -108,11 +99,24 @@ export default function ProductsPage() {
     }
   }
 
+  // Arama/filtre değişince debounce'la 1. sayfadan yükle. (Bu effect mount'ta da çalışır,
+  // ayrı bir mount effect'i gerekmez.)
   useEffect(() => {
     setSelectedProducts(new Set())
-    const timer = setTimeout(() => loadProducts(), 300)
+    const timer = setTimeout(() => { setPage(0); loadProducts(0) }, 300)
     return () => clearTimeout(timer)
   }, [search, filters])
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+
+  const goToPage = (n: number) => {
+    const clamped = Math.min(Math.max(0, n), totalPages - 1)
+    if (clamped === page) return
+    setPage(clamped)
+    setSelectedProducts(new Set())
+    loadProducts(clamped)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
 
   const getErrorMessage = (error: any): string => {
     switch (error.code) {
@@ -150,7 +154,7 @@ export default function ProductsPage() {
 
     showToast('success', editingId ? 'Ürün güncellendi.' : 'Ürün eklendi.')
     resetForm()
-    loadProducts()
+    loadProducts(page)
   }
 
   const handleEdit = (product: Product) => {
@@ -173,7 +177,7 @@ export default function ProductsPage() {
     const { error } = await supabase.from('products').delete().eq('id', id)
     if (error) { showToast('error', getErrorMessage(error)); return }
     showToast('success', 'Ürün silindi.')
-    loadProducts()
+    loadProducts(page)
   }
 
   const resetForm = () => {
@@ -215,7 +219,7 @@ export default function ProductsPage() {
     setSelectedProducts(new Set())
     setShowBulkEdit(false)
     setBulkEditData({ currency: '', unit: '', price_multiplier: '1.0' })
-    loadProducts()
+    loadProducts(page)
   }
 
   const handleBulkDelete = async () => {
@@ -237,7 +241,7 @@ export default function ProductsPage() {
     }
     setBulkLoading(false)
     setSelectedProducts(new Set())
-    loadProducts()
+    loadProducts(page)
   }
 
   const handleBulkUpdateAll = async () => {
@@ -261,7 +265,7 @@ export default function ProductsPage() {
     setBulkLoading(false)
     setShowBulkEditAll(false)
     setBulkEditData({ currency: '', unit: '', price_multiplier: '1.0' })
-    loadProducts()
+    loadProducts(page)
   }
 
   const handleBulkDeleteAll = async () => {
@@ -282,7 +286,8 @@ export default function ProductsPage() {
       showToast('error', err.message)
     }
     setBulkLoading(false)
-    loadProducts()
+    setPage(0)
+    loadProducts(0)
   }
 
   const getCurrencySymbol = (c: string) => c === 'TRY' || c === 'TL' ? '₺' : c === 'USD' ? '$' : c === 'EUR' ? '€' : c
@@ -569,9 +574,56 @@ export default function ProductsPage() {
         </div>
       </div>
 
-      <p className="mt-3 text-xs text-gray-400">
-        {totalCount.toLocaleString('tr-TR')} ürün gösteriliyor
-      </p>
+      {/* Pagination */}
+      <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <p className="text-xs text-gray-500">
+          {totalCount === 0
+            ? '0 ürün'
+            : <>
+                <span className="font-medium text-gray-700">{(page * PAGE_SIZE + 1).toLocaleString('tr-TR')}</span>
+                {'–'}
+                <span className="font-medium text-gray-700">{Math.min((page + 1) * PAGE_SIZE, totalCount).toLocaleString('tr-TR')}</span>
+                {' / '}
+                <span className="font-medium text-gray-700">{totalCount.toLocaleString('tr-TR')}</span>
+                {' ürün'}
+              </>}
+        </p>
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => goToPage(0)}
+              disabled={page === 0 || loading}
+              className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              «
+            </button>
+            <button
+              onClick={() => goToPage(page - 1)}
+              disabled={page === 0 || loading}
+              className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              ‹ Önceki
+            </button>
+            <span className="px-3 py-1.5 text-sm text-gray-600">
+              Sayfa <span className="font-semibold text-gray-800">{page + 1}</span> / {totalPages.toLocaleString('tr-TR')}
+            </span>
+            <button
+              onClick={() => goToPage(page + 1)}
+              disabled={page >= totalPages - 1 || loading}
+              className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Sonraki ›
+            </button>
+            <button
+              onClick={() => goToPage(totalPages - 1)}
+              disabled={page >= totalPages - 1 || loading}
+              className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              »
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
