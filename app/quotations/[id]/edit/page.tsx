@@ -9,6 +9,15 @@ import ProductSelectionModal from '@/components/quotations/ProductSelectionModal
 import BatchMultiMatchModal from '@/components/quotations/BatchMultiMatchModal'
 import { generateQuotationPDF } from '@/lib/pdf-generator'
 import { useAuth } from '@/lib/auth-context'
+import {
+  totalsByCurrency as sumByCurrency,
+  getPrimaryTotals,
+  getCurrencySymbol,
+  lineNet,
+  lineDiscountAmount,
+  CONFIDENCE_THRESHOLD,
+  type PriceLine,
+} from '@/lib/pricing'
 
 // Supabase Edge Function URL
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -197,7 +206,7 @@ export default function EditQuotationPage() {
           product = products.find(p => p.id === match.product_id)
         }
 
-        if (product && match.confidence > 0.3) {
+        if (product && match.confidence > CONFIDENCE_THRESHOLD) {
           addItem(product, true, customerRequest)
           setCustomerRequest('')
         } else {
@@ -324,7 +333,7 @@ export default function EditQuotationPage() {
               product = products.find(p => p.id === match.product_id)
             }
 
-            if (product && match.confidence > 0.3) {
+            if (product && match.confidence > CONFIDENCE_THRESHOLD) {
               const item: QuotationItem = {
                 product: product,
                 quantity: miktar,
@@ -426,7 +435,7 @@ export default function EditQuotationPage() {
             product = products.find(p => p.id === match.product_id)
           }
 
-          if (product && match.confidence > 0.3) {
+          if (product && match.confidence > CONFIDENCE_THRESHOLD) {
             newItems.push({
               product,
               quantity: request.miktar,
@@ -475,42 +484,18 @@ export default function EditQuotationPage() {
     setItems(items.filter((_, i) => i !== index))
   }
 
-  const calculateItemTotal = (item: QuotationItem) => {
-    if (!item.product) return 0
-    const subtotal = (item.product.base_price || 0) * item.quantity
-    const discount = subtotal * (item.discount_percentage / 100)
-    return subtotal - discount
-  }
+  // Money math lives in lib/pricing.ts (single source of truth, 2-dp rounded).
+  const toLine = (item: QuotationItem): PriceLine => ({
+    unitPrice: item.product?.base_price,
+    quantity: item.quantity,
+    discountPercentage: item.discount_percentage,
+    currency: item.product?.currency,
+  })
 
-  const calculateTotalsByCurrency = () => {
-    const byCurrency: Record<string, { total: number, discount: number, final: number }> = {}
-
-    items.filter(item => item.product).forEach(item => {
-      const currency = item.product.currency || 'TRY'
-      if (!byCurrency[currency]) {
-        byCurrency[currency] = { total: 0, discount: 0, final: 0 }
-      }
-
-      const itemTotal = item.product.base_price * item.quantity
-      const itemDiscount = itemTotal * (item.discount_percentage / 100)
-
-      byCurrency[currency].total += itemTotal
-      byCurrency[currency].discount += itemDiscount
-      byCurrency[currency].final += (itemTotal - itemDiscount)
-    })
-
-    return byCurrency
-  }
-
-  const calculateTotals = () => {
-    const byCurrency = calculateTotalsByCurrency()
-    const primaryTotals = byCurrency['TRY'] ||
-                          byCurrency['TL'] ||
-                          Object.values(byCurrency)[0] ||
-                          { total: 0, discount: 0, final: 0 }
-
-    return primaryTotals
-  }
+  const calculateItemTotal = (item: QuotationItem) => lineNet(toLine(item))
+  const calculateTotalsByCurrency = () =>
+    sumByCurrency(items.filter(item => item.product).map(toLine))
+  const calculateTotals = () => getPrimaryTotals(calculateTotalsByCurrency())
 
   const handleSave = async () => {
     if (!selectedCompany || items.length === 0) {
@@ -566,7 +551,7 @@ export default function EditQuotationPage() {
         unit_price: item.product.base_price,
         currency: item.product.currency,
         discount_percentage: item.discount_percentage,
-        discount_amount: (item.product.base_price * item.quantity * item.discount_percentage / 100),
+        discount_amount: lineDiscountAmount(toLine(item)),
         subtotal: calculateItemTotal(item),
         ai_matched: item.ai_matched || false,
         original_request: item.original_request || null
@@ -632,19 +617,6 @@ export default function EditQuotationPage() {
   const totals = calculateTotals()
   const totalsByCurrency = calculateTotalsByCurrency()
 
-  const getCurrencySymbol = (currency: string | null) => {
-    switch (currency ?? 'TRY') {
-      case 'TRY':
-      case 'TL':
-        return '₺'
-      case 'USD':
-        return '$'
-      case 'EUR':
-        return '€'
-      default:
-        return currency
-    }
-  }
 
   if (loading) {
     return (

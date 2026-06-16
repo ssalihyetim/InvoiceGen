@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { generateQuotationPDF } from '@/lib/pdf-generator'
 import { useAuth } from '@/lib/auth-context'
 import { normalizeStatus } from '@/lib/quotation-status'
+import { totalsByCurrency as sumByCurrency, getCurrencySymbol, type PriceLine } from '@/lib/pricing'
 
 type Quotation = {
   id: string
@@ -45,13 +46,6 @@ const STATUS_LABELS: Record<string, string> = {
 
 const STATUS_OPTIONS = ['draft', 'sent', 'approved', 'rejected'] as const
 
-function getCurrencySymbol(currency: string) {
-  if (currency === 'TRY' || currency === 'TL') return '₺'
-  if (currency === 'USD') return '$'
-  if (currency === 'EUR') return '€'
-  return currency
-}
-
 export default function QuotationsPage() {
   const supabase = createSupabaseBrowserClient()
   const { tenantId } = useAuth()
@@ -89,6 +83,7 @@ export default function QuotationsPage() {
         )
       `)
       .order('created_at', { ascending: false })
+      .limit(200)
 
     if (error) {
       showToast('error', 'Teklifler yüklenirken hata oluştu: ' + error.message)
@@ -98,15 +93,21 @@ export default function QuotationsPage() {
     setLoading(false)
   }
 
-  const calculateTotalsByCurrency = (quotation: Quotation) => {
-    const byCurrency: Record<string, number> = {}
-    quotation.quotation_items?.forEach(item => {
-      const currency = item.currency || 'TRY'
-      const subtotal = item.unit_price * item.quantity
-      const discount = subtotal * (item.discount_percentage / 100)
-      byCurrency[currency] = (byCurrency[currency] || 0) + (subtotal - discount)
-    })
-    return byCurrency
+  // Net total per currency, computed via lib/pricing (2-dp rounded). Shape kept as
+  // Record<currency, number> for the existing render consumers.
+  const calculateTotalsByCurrency = (quotation: Quotation): Record<string, number> => {
+    const lines: PriceLine[] = (quotation.quotation_items || []).map(item => ({
+      unitPrice: item.unit_price,
+      quantity: item.quantity,
+      discountPercentage: item.discount_percentage,
+      currency: item.currency,
+    }))
+    const byCurrency = sumByCurrency(lines)
+    const out: Record<string, number> = {}
+    for (const [currency, totals] of Object.entries(byCurrency)) {
+      out[currency] = totals.final
+    }
+    return out
   }
 
   const handleDownloadPDF = async (quotationId: string, quotationNumber: string) => {
