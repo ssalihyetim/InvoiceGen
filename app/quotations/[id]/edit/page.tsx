@@ -14,10 +14,22 @@ import {
   getPrimaryTotals,
   getCurrencySymbol,
   lineNet,
-  lineDiscountAmount,
+  discountedUnitPrice,
+  discountPercentFromTargetUnitPrice,
   CONFIDENCE_THRESHOLD,
-  type PriceLine,
 } from '@/lib/pricing'
+import ManualProductModal, { type ManualProductInput } from '@/components/quotations/ManualProductModal'
+import PriceSyncModal from '@/components/quotations/PriceSyncModal'
+import RecordHistoryModal from '@/components/audit/RecordHistoryModal'
+import {
+  type QuoteLineItem,
+  type EditedCatalogPrice,
+  effectiveUnitPrice,
+  toPriceLine,
+  makeManualProduct,
+  buildQuotationItemRows,
+  getEditedCatalogPrices,
+} from '@/lib/quote-items'
 
 // Supabase Edge Function URL
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -39,13 +51,8 @@ type Product = {
   description: string | null
 }
 
-type QuotationItem = {
-  product: Product
-  quantity: number
-  discount_percentage: number
-  ai_matched: boolean
-  original_request?: string
-}
+// Line item model shared with the new-quotation page (lib/quote-items).
+type QuotationItem = QuoteLineItem
 
 export default function EditQuotationPage() {
   const supabase = createSupabaseBrowserClient()
@@ -77,6 +84,16 @@ export default function EditQuotationPage() {
   // Batch multi-match modal için (Excel/Görsel)
   const [showBatchModal, setShowBatchModal] = useState(false)
   const [batchPendingMatches, setBatchPendingMatches] = useState<any[]>([])
+
+  // F1: manuel (katalog dışı) ürün ekleme modalı
+  const [showManualModal, setShowManualModal] = useState(false)
+
+  // F3: liste fiyatı değişikliklerini Ana Listeye kaydetme onayı
+  const [priceSyncChanges, setPriceSyncChanges] = useState<EditedCatalogPrice[]>([])
+  const [showPriceSyncModal, setShowPriceSyncModal] = useState(false)
+
+  // F4/F5: teklif aktivite & sürüm geçmişi
+  const [showHistory, setShowHistory] = useState(false)
 
   // Load companies and products
   useEffect(() => {
@@ -124,6 +141,11 @@ export default function EditQuotationPage() {
             quantity,
             discount_percentage,
             original_request,
+            unit_price,
+            currency,
+            manual_name,
+            manual_code,
+            manual_unit,
             products (
               id,
               product_type,
@@ -145,14 +167,37 @@ export default function EditQuotationPage() {
         setQuotationNumber(data.quotation_number)
         setSelectedCompany(data.company_id ?? '')
 
-        // Transform quotation_items to items format
-        const loadedItems = data.quotation_items.map((item: any) => ({
-          product: item.products,
-          quantity: item.quantity,
-          discount_percentage: item.discount_percentage,
-          ai_matched: false,
-          original_request: item.original_request || ''
-        }))
+        // Transform quotation_items to in-memory items. Manual (off-catalog) rows have no
+        // joined product → rebuild a synthetic one. For catalog rows, preserve the price
+        // that was quoted (unit_price) via an override so catalog drift doesn't change it,
+        // without flagging it as a fresh edit (price_edited stays false).
+        const loadedItems: QuotationItem[] = data.quotation_items.map((item: any) => {
+          if (!item.products) {
+            return {
+              product: makeManualProduct({
+                name: item.manual_name || 'Manuel ürün',
+                code: item.manual_code || '',
+                unit: item.manual_unit || 'adet',
+                price: item.unit_price ?? 0,
+                currency: item.currency || 'EUR',
+              }),
+              quantity: item.quantity,
+              discount_percentage: item.discount_percentage,
+              ai_matched: false,
+              original_request: item.original_request || '',
+              manual: true,
+            }
+          }
+          return {
+            product: item.products,
+            quantity: item.quantity,
+            discount_percentage: item.discount_percentage,
+            ai_matched: false,
+            original_request: item.original_request || '',
+            unit_price_override: item.unit_price ?? null,
+            price_edited: false,
+          }
+        })
 
         setItems(loadedItems)
       }
@@ -398,6 +443,27 @@ export default function EditQuotationPage() {
     }])
   }
 
+  // F1: add an off-catalog (manual) item from the modal.
+  const addManualItem = (input: ManualProductInput) => {
+    const product = makeManualProduct({
+      name: input.name,
+      code: input.code,
+      unit: input.unit,
+      price: input.price,
+      currency: input.currency,
+    })
+    setItems(prev => [...prev, {
+      product,
+      quantity: 1,
+      discount_percentage: 0,
+      ai_matched: false,
+      original_request: '',
+      manual: true,
+      add_to_catalog: input.addToCatalog,
+    }])
+    setShowManualModal(false)
+  }
+
   const handleImageProductsExtracted = async (requests: { talep: string, miktar: number }[]) => {
     console.log('Starting image products extraction for', requests.length, 'requests')
 
@@ -489,46 +555,97 @@ export default function EditQuotationPage() {
     return Promise.resolve()
   }
 
-  const updateItem = (index: number, field: 'quantity' | 'discount_percentage', value: number) => {
-    const updated = [...items]
-    updated[index] = { ...updated[index], [field]: value }
-    setItems(updated)
+  const patchItem = (index: number, patch: Partial<QuotationItem>) => {
+    setItems(prev => prev.map((it, i) => (i === index ? { ...it, ...patch } : it)))
+  }
+
+  const updateItem = (index: number, field: 'quantity' | 'discount_percentage', value: number) =>
+    patchItem(index, { [field]: value })
+
+  // F2: toggle the per-line price lock; unlocking lets the user edit the list price inline.
+  const togglePriceLock = (index: number) =>
+    patchItem(index, { price_unlocked: !items[index]?.price_unlocked })
+
+  // F2: inline-edit the list (unit) price of a line.
+  const setLinePrice = (index: number, value: number) =>
+    patchItem(index, { unit_price_override: value, price_edited: true })
+
+  // F6: type a target discounted (net) unit price; back-compute the discount percentage.
+  const setLineTargetNetPrice = (index: number, target: number) => {
+    const item = items[index]
+    if (!item) return
+    patchItem(index, {
+      discount_percentage: discountPercentFromTargetUnitPrice(effectiveUnitPrice(item), target),
+    })
   }
 
   const removeItem = (index: number) => {
     setItems(items.filter((_, i) => i !== index))
   }
 
-  // Money math lives in lib/pricing.ts (single source of truth, 2-dp rounded).
-  const toLine = (item: QuotationItem): PriceLine => ({
-    unitPrice: item.product?.base_price,
-    quantity: item.quantity,
-    discountPercentage: item.discount_percentage,
-    currency: item.product?.currency,
-  })
-
-  const calculateItemTotal = (item: QuotationItem) => lineNet(toLine(item))
+  // Money math lives in lib/pricing.ts; toPriceLine respects an inline price edit (F2).
+  const calculateItemTotal = (item: QuotationItem) => lineNet(toPriceLine(item))
   const calculateTotalsByCurrency = () =>
-    sumByCurrency(items.filter(item => item.product).map(toLine))
+    sumByCurrency(items.filter(item => item.product).map(toPriceLine))
   const calculateTotals = () => getPrimaryTotals(calculateTotalsByCurrency())
 
-  const handleSave = async () => {
+  // Entry point: validate, confirm, then (F3) ask about catalog price sync if any list
+  // price was edited; otherwise save straight away.
+  const handleSave = () => {
     if (!selectedCompany || items.length === 0) {
       alert('Lütfen firma seçin ve en az bir ürün ekleyin')
       return
     }
-
     if (!tenantId) {
       alert('Oturum bilgisi henüz yüklenmedi, lütfen tekrar deneyin')
       return
     }
-
     if (!confirm(`"${quotationNumber}" teklifi GÜNCELLENECEK! Devam etmek istiyor musunuz?`)) {
       return
     }
+    const edited = getEditedCatalogPrices(items)
+    if (edited.length > 0) {
+      setPriceSyncChanges(edited)
+      setShowPriceSyncModal(true)
+      return
+    }
+    doSave(false)
+  }
+
+  const doSave = async (syncToCatalog: boolean) => {
+    setShowPriceSyncModal(false)
+    if (!tenantId) return
 
     setSaving(true)
     try {
+      // F3: optionally push edited list prices back to the catalog (audit-logged by trigger).
+      if (syncToCatalog) {
+        for (const change of priceSyncChanges) {
+          const { error } = await (supabase.from('products') as any)
+            .update({ base_price: change.newPrice })
+            .eq('id', change.product_id)
+          if (error) throw error
+        }
+      }
+
+      // F1: optionally add freshly-created manual items to the catalog (best effort).
+      const catalogInserts = items
+        .filter(it => it.manual && it.add_to_catalog && it.product.product_type.trim())
+        .map((it, i) => ({
+          product_type: it.product.product_type.trim(),
+          diameter: it.product.diameter,
+          product_code: it.product.product_code || `MANUEL-${Date.now()}-${i}`,
+          base_price: effectiveUnitPrice(it),
+          currency: it.product.currency,
+          unit: it.product.unit || 'adet',
+          description: it.product.description,
+          tenant_id: tenantId,
+        }))
+      if (catalogInserts.length > 0) {
+        const { error: catErr } = await (supabase.from('products') as any).insert(catalogInserts)
+        if (catErr) console.warn('Manuel ürün kataloğa eklenemedi:', catErr.message)
+      }
+
       const totals = calculateTotals()
       const primaryCurrency = items[0]?.product?.currency || 'TRY'
 
@@ -557,26 +674,40 @@ export default function EditQuotationPage() {
 
       if (updateError) throw updateError
 
-      // 3. Insert new quotation_items
-      const quotationItems = items.map(item => ({
-        quotation_id: quotationId,
-        tenant_id: tenantId,
-        product_id: item.product.id,
-        quantity: item.quantity,
-        unit_price: item.product.base_price,
-        currency: item.product.currency,
-        discount_percentage: item.discount_percentage,
-        discount_amount: lineDiscountAmount(toLine(item)),
-        subtotal: calculateItemTotal(item),
-        ai_matched: item.ai_matched || false,
-        original_request: item.original_request || null
-      }))
+      // 3. Insert new quotation_items (manuel + fiyatı düzenlenmiş kalemler dâhil)
+      const quotationItems = buildQuotationItemRows(items, { quotationId, tenantId })
 
       const { error: itemsError } = await supabase
         .from('quotation_items')
         .insert(quotationItems)
 
       if (itemsError) throw itemsError
+
+      // F5: write a version snapshot (best effort — never blocks the save).
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        const { data: lastV } = await supabase
+          .from('quotation_versions')
+          .select('version_number')
+          .eq('quotation_id', quotationId)
+          .order('version_number', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        const nextVersion = ((lastV?.version_number as number | undefined) ?? 0) + 1
+        await (supabase.from('quotation_versions') as any).insert({
+          quotation_id: quotationId,
+          version_number: nextVersion,
+          changed_by: user?.id ?? null,
+          snapshot: {
+            company_id: selectedCompany,
+            currency: primaryCurrency,
+            totals,
+            items: quotationItems,
+          },
+        })
+      } catch (vErr: any) {
+        console.warn('Sürüm snapshot yazılamadı:', vErr?.message)
+      }
 
       alert(`Teklif başarıyla güncellendi! Teklif No: ${quotationNumber}`)
       router.push('/quotations')
@@ -603,6 +734,11 @@ export default function EditQuotationPage() {
     }
 
     try {
+      // Reflect inline price edits (F2) in the PDF by snapshotting the effective price.
+      const pdfItems = items
+        .filter(i => i.product)
+        .map(i => ({ ...i, product: { ...i.product, base_price: effectiveUnitPrice(i) } }))
+
       await generateQuotationPDF(
         {
           name: company.name,
@@ -610,7 +746,7 @@ export default function EditQuotationPage() {
           phone: null,
           tax_number: null
         },
-        items,
+        pdfItems,
         quotationNumber || `ÖNIZLEME-${new Date().getTime()}`
       )
     } catch (error) {
@@ -643,9 +779,18 @@ export default function EditQuotationPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-800">Teklif Düzenle</h1>
-        <p className="text-gray-600 mt-2">Teklif No: <span className="font-semibold">{quotationNumber}</span></p>
+      <div className="mb-6 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-800">Teklif Düzenle</h1>
+          <p className="text-gray-600 mt-2">Teklif No: <span className="font-semibold">{quotationNumber}</span></p>
+        </div>
+        <button
+          onClick={() => setShowHistory(true)}
+          className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm font-medium whitespace-nowrap min-h-[44px]"
+          title="Bu teklifin aktivite ve sürüm geçmişi"
+        >
+          🕘 Aktivite / Geçmiş
+        </button>
       </div>
 
       {/* Firma Seçimi */}
@@ -763,13 +908,21 @@ export default function EditQuotationPage() {
         {/* Manuel Seçim */}
         {activeTab === 'manual' && (
           <div>
-            <input
-              type="text"
-              value={productSearch}
-              onChange={(e) => setProductSearch(e.target.value)}
-              placeholder="Ürün ara (kod, tip, çap)..."
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg mb-4 min-h-[44px] text-base"
-            />
+            <div className="flex flex-col sm:flex-row gap-3 mb-4">
+              <input
+                type="text"
+                value={productSearch}
+                onChange={(e) => setProductSearch(e.target.value)}
+                placeholder="Ürün ara (kod, tip, çap)..."
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg min-h-[44px] text-base"
+              />
+              <button
+                onClick={() => setShowManualModal(true)}
+                className="w-full sm:w-auto px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 active:bg-purple-800 font-medium min-h-[44px] whitespace-nowrap"
+              >
+                ➕ Manuel ürün (listede yok)
+              </button>
+            </div>
 
             {/* Desktop Tablo */}
             <div className="hidden lg:block max-h-96 overflow-y-auto border border-gray-200 rounded-lg">
@@ -878,22 +1031,54 @@ export default function EditQuotationPage() {
                   <th className="text-right py-2 px-2">Birim Fiyat</th>
                   <th className="text-center py-2 px-2">Miktar</th>
                   <th className="text-center py-2 px-2">İskonto %</th>
+                  <th className="text-right py-2 px-2">İskonto Birim Fiyat</th>
                   <th className="text-right py-2 px-2">Toplam</th>
                   <th className="text-center py-2 px-2"></th>
                 </tr>
               </thead>
               <tbody>
-                {items.filter(item => item.product).map((item, index) => (
+                {items.filter(item => item.product).map((item, index) => {
+                  const listPrice = effectiveUnitPrice(item)
+                  const catalogPrice = item.product?.base_price ?? 0
+                  const netUnit = discountedUnitPrice(listPrice, item.discount_percentage)
+                  const curr = item.product?.currency || 'TL'
+                  const priceChanged = !item.manual && item.price_edited && listPrice !== catalogPrice
+                  return (
                   <tr key={index} className="border-b">
                     <td className="py-2 px-2">
                       {item.product?.product_type}{item.product?.diameter ? ` - ${item.product.diameter}` : ''}
+                      {item.manual && <span className="ml-2 text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded">Manuel</span>}
                       {item.ai_matched && <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-1 rounded">AI</span>}
                     </td>
                     <td className="py-2 px-2">{item.product?.product_code}</td>
                     <td className="py-2 px-2 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <span>{(item.product?.base_price || 0).toFixed(2)}{getCurrencySymbol(item.product?.currency || 'TL')}</span>
-                        {(item.product?.base_price || 0) === 0 && (
+                        {item.price_unlocked ? (
+                          <input
+                            type="number"
+                            value={listPrice}
+                            onChange={(e) => setLinePrice(index, Number(e.target.value))}
+                            className="w-24 px-2 py-1 border border-blue-400 rounded text-right"
+                            min="0"
+                            step="0.01"
+                          />
+                        ) : (
+                          <span className={priceChanged ? 'text-blue-700 font-medium' : ''}>
+                            {listPrice.toFixed(2)}{getCurrencySymbol(curr)}
+                          </span>
+                        )}
+                        {priceChanged && !item.price_unlocked && (
+                          <span className="text-xs text-gray-400 line-through">{catalogPrice.toFixed(2)}</span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => togglePriceLock(index)}
+                          title={item.price_unlocked ? 'Fiyatı kilitle' : 'Fiyatı düzenle'}
+                          className="text-gray-500 hover:text-blue-600"
+                        >
+                          {item.price_unlocked ? '🔓' : '🔒'}
+                        </button>
+                        {listPrice === 0 && (
                           <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded whitespace-nowrap">
                             ⚠️ Fiyat sorunuz
                           </span>
@@ -921,8 +1106,21 @@ export default function EditQuotationPage() {
                         step="1"
                       />
                     </td>
+                    <td className="py-2 px-2">
+                      <input
+                        key={`net-${index}-${item.discount_percentage}-${listPrice}`}
+                        type="number"
+                        defaultValue={netUnit.toFixed(2)}
+                        onBlur={(e) => setLineTargetNetPrice(index, Number(e.target.value))}
+                        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                        title="Hedef iskontolu birim fiyat — iskonto otomatik hesaplanır"
+                        className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-orange-700"
+                        min="0"
+                        step="0.01"
+                      />
+                    </td>
                     <td className="py-2 px-2 text-right font-semibold">
-                      {calculateItemTotal(item).toFixed(2)}{getCurrencySymbol(item.product?.currency || 'TL')}
+                      {calculateItemTotal(item).toFixed(2)}{getCurrencySymbol(curr)}
                     </td>
                     <td className="py-2 px-2 text-center">
                       <button
@@ -933,7 +1131,8 @@ export default function EditQuotationPage() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -952,11 +1151,18 @@ export default function EditQuotationPage() {
                     <p className="text-sm text-gray-600 font-mono mt-1">
                       {item.product?.product_code}
                     </p>
-                    {item.ai_matched && (
-                      <span className="inline-block mt-2 text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
-                        AI Eşleşti
-                      </span>
-                    )}
+                    <div className="flex gap-1 mt-2">
+                      {item.manual && (
+                        <span className="inline-block text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded">
+                          Manuel
+                        </span>
+                      )}
+                      {item.ai_matched && (
+                        <span className="inline-block text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
+                          AI Eşleşti
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <button
                     onClick={() => removeItem(index)}
@@ -969,21 +1175,55 @@ export default function EditQuotationPage() {
                 {/* Fiyat Bilgileri */}
                 <div className="grid grid-cols-2 gap-3 mb-3 text-sm">
                   <div>
-                    <label className="text-gray-600 block mb-1">Birim Fiyat</label>
-                    <div className="font-semibold flex items-center gap-2">
-                      <span>{(item.product?.base_price || 0).toFixed(2)}{getCurrencySymbol(item.product?.currency || 'TL')}</span>
-                      {(item.product?.base_price || 0) === 0 && (
-                        <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded whitespace-nowrap">
-                          ⚠️ Fiyat sorunuz
-                        </span>
-                      )}
-                    </div>
+                    <label className="text-gray-600 flex items-center justify-between mb-1">
+                      <span>Birim Fiyat</span>
+                      <button
+                        type="button"
+                        onClick={() => togglePriceLock(index)}
+                        className="text-gray-500 hover:text-blue-600"
+                        title={item.price_unlocked ? 'Fiyatı kilitle' : 'Fiyatı düzenle'}
+                      >
+                        {item.price_unlocked ? '🔓' : '🔒'}
+                      </button>
+                    </label>
+                    {item.price_unlocked ? (
+                      <input
+                        type="number"
+                        value={effectiveUnitPrice(item)}
+                        onChange={(e) => setLinePrice(index, Number(e.target.value))}
+                        className="w-full px-3 py-2 border border-blue-400 rounded-lg text-right min-h-[44px] text-base"
+                        min="0"
+                        step="0.01"
+                      />
+                    ) : (
+                      <div className="font-semibold flex items-center gap-2">
+                        <span>{effectiveUnitPrice(item).toFixed(2)}{getCurrencySymbol(item.product?.currency || 'TL')}</span>
+                        {effectiveUnitPrice(item) === 0 && (
+                          <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded whitespace-nowrap">
+                            ⚠️ Fiyat sorunuz
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div>
-                    <label className="text-gray-600 block mb-1">Toplam</label>
-                    <div className="font-bold text-blue-600">
-                      {calculateItemTotal(item).toFixed(2)}{getCurrencySymbol(item.product?.currency || 'TL')}
-                    </div>
+                    <label className="text-gray-600 block mb-1">İskonto Birim Fiyat</label>
+                    <input
+                      key={`mnet-${index}-${item.discount_percentage}-${effectiveUnitPrice(item)}`}
+                      type="number"
+                      defaultValue={discountedUnitPrice(effectiveUnitPrice(item), item.discount_percentage).toFixed(2)}
+                      onBlur={(e) => setLineTargetNetPrice(index, Number(e.target.value))}
+                      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                      className="w-full px-3 py-2 border rounded-lg text-right min-h-[44px] text-base text-orange-700"
+                      min="0"
+                      step="0.01"
+                    />
+                  </div>
+                </div>
+                <div className="mb-3 text-sm">
+                  <label className="text-gray-600 block mb-1">Toplam</label>
+                  <div className="font-bold text-blue-600">
+                    {calculateItemTotal(item).toFixed(2)}{getCurrencySymbol(item.product?.currency || 'TL')}
                   </div>
                 </div>
 
@@ -1082,6 +1322,34 @@ export default function EditQuotationPage() {
         onConfirmAll={handleBatchConfirmAll}
         onCancel={handleBatchCancel}
       />
+
+      {/* F1: Manuel ürün ekleme modalı */}
+      <ManualProductModal
+        isOpen={showManualModal}
+        onAdd={addManualItem}
+        onCancel={() => setShowManualModal(false)}
+      />
+
+      {/* F3: Liste fiyatı → Ana Liste senkronizasyon onayı */}
+      <PriceSyncModal
+        isOpen={showPriceSyncModal}
+        changes={priceSyncChanges}
+        saving={saving}
+        onConfirm={() => doSave(true)}
+        onSkip={() => doSave(false)}
+        onCancel={() => setShowPriceSyncModal(false)}
+      />
+
+      {/* F4/F5: Teklif aktivite & sürüm geçmişi */}
+      {showHistory && quotationId && (
+        <RecordHistoryModal
+          isOpen={showHistory}
+          entityType="quotations"
+          entityId={quotationId}
+          title={`Teklif No: ${quotationNumber}`}
+          onClose={() => setShowHistory(false)}
+        />
+      )}
     </div>
   )
 }

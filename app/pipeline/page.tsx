@@ -54,6 +54,23 @@ export default function PipelinePage() {
 
   const handleStatusChange = async (quotationId: string, newStatus: string) => {
     const supabase = createSupabaseBrowserClient()
+
+    // F7: a quote with a zero-price line ("Fiyat sorunuz") can't move to sent/approved.
+    if (newStatus === 'sent' || newStatus === 'approved') {
+      const { data: zeroLines } = await supabase
+        .from('quotation_items')
+        .select('id, unit_price, manual_name, products(product_code, product_type)')
+        .eq('quotation_id', quotationId)
+        .lte('unit_price', 0)
+      if (zeroLines && zeroLines.length > 0) {
+        const names = zeroLines.map(
+          (l: any) => l.manual_name || l.products?.product_code || l.products?.product_type || '—',
+        )
+        alert(`Fiyatı 0 olan kalemler var, "${STATUS_LABELS[newStatus as keyof typeof STATUS_LABELS]}" durumuna geçilemez:\n• ${names.join('\n• ')}`)
+        return
+      }
+    }
+
     const updateData: any = { status: newStatus }
     if (newStatus === 'sent') updateData.sent_at = new Date().toISOString()
 

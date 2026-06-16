@@ -165,6 +165,22 @@ export default function QuotationsPage() {
   }
 
   const handleStatusChange = async (quotationId: string, newStatus: string) => {
+    // F7: a quote with a zero-price line ("Fiyat sorunuz") can't move to sent/approved.
+    if (newStatus === 'sent' || newStatus === 'approved') {
+      const { data: zeroLines } = await supabase
+        .from('quotation_items')
+        .select('id, unit_price, manual_name, products(product_code, product_type)')
+        .eq('quotation_id', quotationId)
+        .lte('unit_price', 0)
+      if (zeroLines && zeroLines.length > 0) {
+        const names = zeroLines.map(
+          (l: any) => l.manual_name || l.products?.product_code || l.products?.product_type || '—',
+        )
+        showToast('error', `Fiyatı 0 olan kalemler var, "${STATUS_LABELS[newStatus as keyof typeof STATUS_LABELS]}" durumuna geçilemez: ${names.join(', ')}`)
+        return
+      }
+    }
+
     const { error } = await supabase
       .from('quotations')
       .update({ status: newStatus })
@@ -173,7 +189,7 @@ export default function QuotationsPage() {
     if (error) {
       showToast('error', 'Durum güncellenirken hata: ' + error.message)
     } else {
-      showToast('success', `Durum "${STATUS_LABELS[newStatus]}" olarak güncellendi.`)
+      showToast('success', `Durum "${STATUS_LABELS[newStatus as keyof typeof STATUS_LABELS]}" olarak güncellendi.`)
       loadQuotations()
     }
   }

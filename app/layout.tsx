@@ -141,7 +141,7 @@ export default function RootLayout({
                 onClick={() => setMobileMenuOpen(false)}
               >
                 <span className="text-lg">📝</span>
-                <span>Denetim Kaydı</span>
+                <span>Değişiklik Geçmişi</span>
               </a>
             </nav>
             <div className="px-3 pb-4">

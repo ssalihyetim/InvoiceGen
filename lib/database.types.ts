@@ -571,6 +571,10 @@ export type Database = {
           discount_amount: number | null
           discount_percentage: number | null
           id: string
+          list_price: number | null
+          manual_code: string | null
+          manual_name: string | null
+          manual_unit: string | null
           original_request: string | null
           product_id: string | null
           quantity: number
@@ -587,6 +591,10 @@ export type Database = {
           discount_amount?: number | null
           discount_percentage?: number | null
           id?: string
+          list_price?: number | null
+          manual_code?: string | null
+          manual_name?: string | null
+          manual_unit?: string | null
           original_request?: string | null
           product_id?: string | null
           quantity?: number
@@ -603,6 +611,10 @@ export type Database = {
           discount_amount?: number | null
           discount_percentage?: number | null
           id?: string
+          list_price?: number | null
+          manual_code?: string | null
+          manual_name?: string | null
+          manual_unit?: string | null
           original_request?: string | null
           product_id?: string | null
           quantity?: number
@@ -888,6 +900,13 @@ export type Database = {
           }
       expire_overdue_quotations: { Args: never; Returns: number }
       get_tenant_id: { Args: never; Returns: string }
+      get_tenant_user_emails: {
+        Args: never
+        Returns: {
+          email: string
+          id: string
+        }[]
+      }
       get_user_role: { Args: never; Returns: string }
       notify_expiring_quotations: { Args: never; Returns: number }
     }

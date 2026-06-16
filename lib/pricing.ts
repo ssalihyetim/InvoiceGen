@@ -82,6 +82,36 @@ export function getPrimaryTotals(byCurrency: Record<string, CurrencyTotals>): Cu
   )
 }
 
+// Clamp a percentage into the [0, 100] range and round to 2 decimals (the DB column
+// is DECIMAL(5,2)). Non-finite input (e.g. division by a zero list price) becomes 0.
+export function clampPercent(pct: number): number {
+  if (!Number.isFinite(pct)) return 0
+  return Math.min(100, Math.max(0, roundMoney(pct)))
+}
+
+// The discounted (net) unit price implied by a list price + discount percentage.
+// This is what the quote shows as "İskonto Birim Fiyat".
+export function discountedUnitPrice(
+  listPrice: number | null | undefined,
+  discountPercentage: number | null | undefined,
+): number {
+  return roundMoney((listPrice || 0) * (1 - (discountPercentage || 0) / 100))
+}
+
+// Inverse of discountedUnitPrice: given a list price and a desired net unit price,
+// return the discount percentage that produces it. Powers the "target net price"
+// line editor (F6) so a salesperson can type the price they want and have the
+// discount back-computed. Guards a zero/absent list price (no meaningful percentage)
+// and clamps to [0, 100] so a target above list price doesn't yield a negative discount.
+export function discountPercentFromTargetUnitPrice(
+  listPrice: number | null | undefined,
+  targetUnitPrice: number,
+): number {
+  const lp = listPrice || 0
+  if (lp <= 0) return 0
+  return clampPercent((1 - targetUnitPrice / lp) * 100)
+}
+
 export function getCurrencySymbol(currency: string | null | undefined): string {
   switch (currency ?? DEFAULT_CURRENCY) {
     case 'TRY':

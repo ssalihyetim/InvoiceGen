@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createSupabaseBrowserClient } from '@/lib/supabase-browser'
 import { useAuth } from '@/lib/auth-context'
+import RecordHistoryModal from '@/components/audit/RecordHistoryModal'
 
 type Product = {
   id: string
@@ -47,6 +48,8 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(false)
   const [bulkLoading, setBulkLoading] = useState(false)
   const [toast, setToast] = useState<Toast | null>(null)
+  // F4: per-record change history (incl. list-price history) for a product.
+  const [historyProduct, setHistoryProduct] = useState<Product | null>(null)
 
   const showToast = (type: Toast['type'], message: string) => {
     setToast({ type, message })
@@ -562,6 +565,9 @@ export default function ProductsPage() {
                       <button onClick={() => handleEdit(product)} className="px-3 py-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 transition-colors">
                         Düzenle
                       </button>
+                      <button onClick={() => setHistoryProduct(product)} className="px-3 py-1 text-xs bg-gray-50 text-gray-700 border border-gray-200 rounded hover:bg-gray-100 transition-colors" title="Fiyat ve değişiklik geçmişi">
+                        🕘 Geçmiş
+                      </button>
                       <button onClick={() => handleDelete(product.id)} className="px-3 py-1 text-xs bg-red-50 text-red-700 border border-red-200 rounded hover:bg-red-100 transition-colors">
                         Sil
                       </button>
@@ -624,6 +630,17 @@ export default function ProductsPage() {
           </div>
         )}
       </div>
+
+      {/* F4: Ürün değişiklik / fiyat geçmişi */}
+      {historyProduct && (
+        <RecordHistoryModal
+          isOpen={!!historyProduct}
+          entityType="products"
+          entityId={historyProduct.id}
+          title={`${historyProduct.product_code} — ${historyProduct.product_type}`}
+          onClose={() => setHistoryProduct(null)}
+        />
+      )}
     </div>
   )
 }

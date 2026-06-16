@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import DiffViewer from './DiffViewer'
+import { actionLabel, actionColor, entityLabel } from '@/lib/audit-labels'
 
 type AuditLog = {
   id: string
@@ -17,23 +18,11 @@ type AuditLog = {
 interface AuditLogTableProps {
   logs: AuditLog[]
   loading: boolean
+  // Map of user_id -> email (from useUserEmails) so we can show who made the change.
+  userEmails?: Record<string, string>
 }
 
-const ACTION_LABELS: Record<string, { label: string; color: string }> = {
-  create: { label: 'Oluşturma', color: 'bg-green-100 text-green-800' },
-  update: { label: 'Güncelleme', color: 'bg-blue-100 text-blue-800' },
-  delete: { label: 'Silme', color: 'bg-red-100 text-red-800' },
-  status_change: { label: 'Durum Değişikliği', color: 'bg-purple-100 text-purple-800' },
-}
-
-const ENTITY_LABELS: Record<string, string> = {
-  products: 'Ürün',
-  companies: 'Firma',
-  quotations: 'Teklif',
-  quotation_items: 'Teklif Kalemi',
-}
-
-export default function AuditLogTable({ logs, loading }: AuditLogTableProps) {
+export default function AuditLogTable({ logs, loading, userEmails = {} }: AuditLogTableProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   if (loading) {
@@ -47,8 +36,6 @@ export default function AuditLogTable({ logs, loading }: AuditLogTableProps) {
   return (
     <div className="space-y-2">
       {logs.map(log => {
-        const actionInfo = ACTION_LABELS[log.action] || { label: log.action, color: 'bg-gray-100 text-gray-800' }
-        const entityLabel = ENTITY_LABELS[log.entity_type] || log.entity_type
         const isExpanded = expandedId === log.id
 
         // Get entity name from data
@@ -60,17 +47,20 @@ export default function AuditLogTable({ logs, loading }: AuditLogTableProps) {
           || log.old_data?.quotation_number
           || log.entity_id.slice(0, 8)
 
+        const actor = log.user_id ? (userEmails[log.user_id] || 'Bilinmeyen kullanıcı') : 'Sistem'
+
         return (
           <div key={log.id} className="border border-gray-200 rounded-lg overflow-hidden">
             <button
               onClick={() => setExpandedId(isExpanded ? null : log.id)}
-              className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 text-left"
+              className="w-full px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-1 hover:bg-gray-50 text-left"
             >
-              <span className={`px-2 py-0.5 rounded text-xs font-medium ${actionInfo.color}`}>
-                {actionInfo.label}
+              <span className={`px-2 py-0.5 rounded text-xs font-medium ${actionColor(log.action)}`}>
+                {actionLabel(log.action)}
               </span>
-              <span className="text-sm text-gray-600">{entityLabel}</span>
+              <span className="text-sm text-gray-600">{entityLabel(log.entity_type)}</span>
               <span className="text-sm font-medium text-gray-800 truncate">{entityName}</span>
+              <span className="text-xs text-gray-500 truncate">· {actor}</span>
               <span className="ml-auto text-xs text-gray-400 flex-shrink-0">
                 {new Date(log.created_at).toLocaleString('tr-TR')}
               </span>

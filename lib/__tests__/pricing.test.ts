@@ -9,6 +9,9 @@ import {
   totalsByCurrency,
   getPrimaryTotals,
   getCurrencySymbol,
+  clampPercent,
+  discountedUnitPrice,
+  discountPercentFromTargetUnitPrice,
   type PriceLine,
 } from '../pricing'
 
@@ -115,6 +118,48 @@ describe('getCurrencySymbol', () => {
     expect(getCurrencySymbol('GBP')).toBe('GBP')
     expect(getCurrencySymbol(null)).toBe('₺')
     expect(getCurrencySymbol(undefined)).toBe('₺')
+  })
+})
+
+describe('clampPercent', () => {
+  it('clamps into [0, 100]', () => {
+    expect(clampPercent(-5)).toBe(0)
+    expect(clampPercent(150)).toBe(100)
+    expect(clampPercent(33.333)).toBe(33.33)
+  })
+  it('treats non-finite input as 0', () => {
+    expect(clampPercent(Infinity)).toBe(0)
+    expect(clampPercent(NaN)).toBe(0)
+  })
+})
+
+describe('discountedUnitPrice', () => {
+  it('applies the discount to the list price', () => {
+    expect(discountedUnitPrice(100, 10)).toBe(90)
+    expect(discountedUnitPrice(12.34, 12.5)).toBe(10.8) // 10.7975 -> 10.80
+  })
+  it('treats null/undefined as 0', () => {
+    expect(discountedUnitPrice(null, 10)).toBe(0)
+    expect(discountedUnitPrice(100, null)).toBe(100)
+  })
+})
+
+describe('discountPercentFromTargetUnitPrice', () => {
+  it('back-computes the discount that yields a target net price', () => {
+    expect(discountPercentFromTargetUnitPrice(100, 90)).toBe(10)
+    expect(discountPercentFromTargetUnitPrice(200, 150)).toBe(25)
+  })
+  it('round-trips with discountedUnitPrice', () => {
+    const pct = discountPercentFromTargetUnitPrice(100, 73)
+    expect(pct).toBe(27)
+    expect(discountedUnitPrice(100, pct)).toBe(73)
+  })
+  it('guards a zero/absent list price (no division by zero)', () => {
+    expect(discountPercentFromTargetUnitPrice(0, 50)).toBe(0)
+    expect(discountPercentFromTargetUnitPrice(null, 50)).toBe(0)
+  })
+  it('clamps a target above list price to 0% (no negative discount)', () => {
+    expect(discountPercentFromTargetUnitPrice(100, 120)).toBe(0)
   })
 })
 
