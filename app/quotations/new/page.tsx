@@ -191,7 +191,7 @@ export default function NewQuotationPage() {
   const handleBatchConfirmAll = (selections: { request: string, product: Product, quantity: number, match: any }[]) => {
     console.log('Batch selections confirmed:', selections)
 
-    // Tüm seçimleri items'a ekle
+    // Seçilen ürünleri ekle
     const newItems = selections.map(sel => ({
       product: sel.product,
       quantity: sel.quantity,
@@ -201,16 +201,30 @@ export default function NewQuotationPage() {
     }))
 
     setItems(prev => [...prev, ...newItems])
+
+    // Kısmi onay: seçilmeyen belirsiz talepler sessizce kaybolmaz — manuel ekleme
+    // listesine düşer ki kullanıcı sonra ekleyebilsin.
+    const selectedRequests = new Set(selections.map(s => s.request))
+    const skipped = batchPendingMatches
+      .filter(pm => !selectedRequests.has(pm.originalRequest))
+      .map(pm => pm.originalRequest)
+    if (skipped.length > 0) setUnmatchedItems(prev => [...prev, ...skipped])
+
     setShowBatchModal(false)
     setBatchPendingMatches([])
 
-    alert(`${selections.length} ürün başarıyla eklendi!`)
+    alert(
+      `${selections.length} ürün eklendi.` +
+      (skipped.length > 0 ? `\n${skipped.length} talep atlandı (aşağıdan manuel ekleyebilirsiniz).` : '')
+    )
   }
 
   const handleBatchCancel = () => {
+    // İptal = tüm belirsiz talepleri atla, ama manuel ekleme listesinde göster (kaybolmasın).
+    const skipped = batchPendingMatches.map(pm => pm.originalRequest)
+    if (skipped.length > 0) setUnmatchedItems(prev => [...prev, ...skipped])
     setShowBatchModal(false)
     setBatchPendingMatches([])
-    alert('Belirsiz talepler iptal edildi. Manuel olarak ekleyebilirsiniz.')
   }
 
   const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

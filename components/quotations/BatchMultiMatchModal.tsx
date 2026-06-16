@@ -212,16 +212,21 @@ export default function BatchMultiMatchModal({
           </div>
         </div>
 
-        {/* Footer */}
+        {/* Footer — kısmi onaya izin verilir: seçilenler eklenir, seçilmeyenler atlanıp
+            "manuel ekleyebilirsiniz" listesine düşer (sessizce kaybolmaz). */}
         <div className="border-t border-gray-200 px-6 py-4 bg-gray-50 flex items-center justify-between flex-shrink-0">
           <div className="text-sm">
             {allSelected ? (
               <span className="text-green-600 font-medium">
                 ✓ Tüm talepler için seçim yapıldı ({selectedCount}/{pendingMatches.length})
               </span>
+            ) : selectedCount > 0 ? (
+              <span className="text-gray-600">
+                {selectedCount} seçildi, <span className="text-yellow-600 font-medium">{pendingMatches.length - selectedCount} talep atlanacak</span> (sonra manuel ekleyebilirsiniz)
+              </span>
             ) : (
-              <span className="text-yellow-600 font-medium">
-                ⚠ {pendingMatches.length - selectedCount} talep için seçim yapmanız gerekiyor
+              <span className="text-gray-500">
+                Eklemek istediğiniz talepler için ürün seçin; seçmedikleriniz atlanır.
               </span>
             )}
           </div>
@@ -230,20 +235,20 @@ export default function BatchMultiMatchModal({
               onClick={onCancel}
               className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
             >
-              İptal
+              Tümünü Atla
             </button>
             <button
               onClick={handleConfirm}
-              disabled={!allSelected}
+              disabled={selectedCount === 0}
               className={`
                 px-6 py-2 rounded-lg font-medium transition-colors
-                ${allSelected
+                ${selectedCount > 0
                   ? 'bg-blue-600 text-white hover:bg-blue-700'
                   : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                 }
               `}
             >
-              Tümünü Onayla ({selectedCount}/{pendingMatches.length})
+              {allSelected ? `Tümünü Onayla (${selectedCount})` : `Seçilenleri Ekle (${selectedCount}/${pendingMatches.length})`}
             </button>
           </div>
         </div>
