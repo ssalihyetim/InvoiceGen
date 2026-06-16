@@ -78,7 +78,7 @@ describe('canonical type detection', () => {
 })
 
 describe('parseCustomerRequest', () => {
-  it('does not mistake a numeric customer catalog code for a product code', () => {
+  it('does not mistake a numeric customer catalog code for a (hyphenated) product code', () => {
     const p = parseCustomerRequest('001 117 0021 0050 D50 PN16 90° Spigot Dirsek')
     expect(p.productCode).toBeUndefined()
     expect(p.primaryDiameter).toBe('50')
@@ -87,6 +87,20 @@ describe('parseCustomerRequest', () => {
   it('detects a real hyphenated product code', () => {
     const p = parseCustomerRequest('NTG-EF-63 EF MANŞON')
     expect(p.productCode).toBe('NTG-EF-63')
+  })
+
+  // The 0042-vs-2042 bug: the request line carries the exact (unique) NTG catalog code of a
+  // SPIGOT product but also the noise word "EF"; the code must be captured so exactMatch can
+  // pin the right product before the "EF" keyword drags scoring to the EF variant.
+  it('captures the NTG catalog code (3-3-4-4) even when the line also says "EF"', () => {
+    const p = parseCustomerRequest('001 117 0042 0127 D125*D90 PN16 EF İnegöl TE')
+    expect(p.catalogCode).toBe('001 117 0042 0127')
+    expect(p.productCode).toBeUndefined() // not a hyphenated code
+  })
+
+  it('normalises whitespace in the catalog code and leaves it undefined when absent', () => {
+    expect(parseCustomerRequest('001  117   0021 0050 D50').catalogCode).toBe('001 117 0021 0050')
+    expect(parseCustomerRequest('EF MANŞON 63').catalogCode).toBeUndefined()
   })
 })
 

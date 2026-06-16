@@ -61,13 +61,20 @@ export const INCOMPATIBLE_TYPES: Record<string, string[]> = {
 export function normalizeText(s: string): string {
   return s
     .replace(/°/g, 'º')            // U+00B0 → U+00BA (katalog formatı)
-    .replace(/ /g, ' ')       // non-breaking space
+    .replace(/\u00A0/g, ' ')       // non-breaking space
     .replace(/\s+/g, ' ')
     .trim()
 }
 
 // Basınç/sınıf token'ları — bunlar çap DEĞİL (PN16, SDR11, DN100 gibi).
 const PRESSURE_RE = /^(PN|SDR|DN)\d+$/i
+
+// NTG katalog kodu: "001 117 0042 0127" (3-3-4-4 rakam grubu, boşluk ayraçlı).
+// NTG fiyat listesi import'undan SONRA bu kodlar GERÇEK product_code oldu (899 ürün, hepsi
+// benzersiz). Eski varsayım "katalog kodu ürün tablosunda yok, müşteri kodu" artık geçersiz.
+// Talepte bu kod varsa benzersiz ürünü birebir tanımlar → metindeki gürültüyü (ör. yanlış
+// "EF" kelimesi) ezerek exact eşleşmeli. \b: kod kelime-sınırlarıyla çevrili olmalı.
+const CATALOG_CODE_RE = /\b\d{3}\s+\d{3}\s+\d{4}\s+\d{4}\b/
 
 // Talep metninden çapları çıkar. Öncelik: D-prefix > MM-suffix > AxB redüksiyon > en büyük makul sayı.
 // Açılar (90º, 45º) çaptan dışlanır.
@@ -159,7 +166,8 @@ export function typeKeywordInText(text: string, kw: string): boolean {
 export interface ParsedRequest {
   originalRequest: string
   normalizedRequest: string // normalizeText uygulanmış ham ifade (FTS için)
-  productCode?: string      // Tespit edilen ürün kodu
+  productCode?: string      // Tespit edilen ürün kodu (harfli, ör. NTG-EF-63)
+  catalogCode?: string      // NTG katalog kodu (ör. "001 117 0042 0127") — benzersiz product_code
   numbers: string[]         // Çıkarılan sayılar (örn: ["63", "50"])
   keywords: string[]        // Temizlenmiş kelimeler
   productTypeKeywords: string[]  // Ürün tipini belirleyen kelimeler (yüksek ağırlık)
@@ -195,6 +203,10 @@ export function parseCustomerRequest(request: string): ParsedRequest {
   const codeMatches = normalized.match(/\b[A-Z]{2,}(?:[-][A-Z0-9]+)+\b/g)
   const productCode = codeMatches?.[0]
 
+  // 2b. NTG katalog kodu (3-3-4-4 rakam grubu) — benzersiz product_code, exact eşleşir.
+  const catalogMatch = normalizedRequest.match(CATALOG_CODE_RE)
+  const catalogCode = catalogMatch ? catalogMatch[0].replace(/\s+/g, ' ').trim() : undefined
+
   // 3. Çap/açı tespiti — açıları (90º) çaptan ayır, "90-355" gibi sahte pattern ÜRETME.
   const { diameters, angles, primaryDiameter, reductionPattern } = extractDimensions(request)
 
@@ -224,6 +236,7 @@ export function parseCustomerRequest(request: string): ParsedRequest {
     originalRequest,
     normalizedRequest,
     productCode,
+    catalogCode,
     numbers,
     keywords,
     productTypeKeywords,
@@ -237,11 +250,36 @@ export function parseCustomerRequest(request: string): ParsedRequest {
 
 // Strategy 1: Exact Match (ürün kodu tam eşleşme veya çap+tip ile tek aday)
 async function exactMatch(supabase: any, parsed: ParsedRequest): Promise<MatchResult | null> {
-  if (!parsed.productCode && !parsed.primaryDiameter) {
+  if (!parsed.catalogCode && !parsed.productCode && !parsed.primaryDiameter) {
     return null
   }
 
   const startTime = Date.now()
+
+  // NTG katalog kodu — benzersiz product_code ile birebir eşleşme. Talep metnindeki
+  // gürültüyü (ör. SPIGOT ürünün satırında yanlışlıkla yazan "EF") ezer. Bu, "001 117 0042
+  // 0127" (SPIGOT) talebinin "001 117 2042 0127" (EF) ile eşleşmesi bug'ını kökten çözer.
+  if (parsed.catalogCode) {
+    console.log('🎯 Exact match: Searching for catalog code', parsed.catalogCode)
+    const { data } = await supabase
+      .from('products')
+      .select('*')
+      .eq('product_code', parsed.catalogCode)
+      .limit(1)
+
+    if (data && data.length > 0) {
+      console.log('🎯 Catalog code exact match:', data[0].product_code)
+      return {
+        product_id: data[0].id,
+        product: data[0],
+        confidence: 1.0,
+        strategy: 'exact',
+        reasoning: `Katalog kodu birebir eşleşme: ${parsed.catalogCode}`,
+        execution_time: Date.now() - startTime,
+      }
+    }
+    console.log('🎯 Catalog code not found in DB:', parsed.catalogCode, '— falling through')
+  }
 
   // Ürün kodu varsa direkt ara
   if (parsed.productCode) {
