@@ -45,6 +45,7 @@ export default function CompaniesPage() {
       .from('companies')
       .select('*')
       .order('name')
+      .limit(500)
 
     if (error) {
       showToast('error', 'Firmalar yüklenirken hata oluştu: ' + error.message)
